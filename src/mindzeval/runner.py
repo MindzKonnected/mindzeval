@@ -213,6 +213,7 @@ async def _run_case(
             combo=dict(combo),
             findings=list(check.findings) if check else [],
             blocked=bool(check and check.blocked),
+            reference_sql=turn.reference_sql,
         )
 
         if result.blocked and not case.is_multi_turn:

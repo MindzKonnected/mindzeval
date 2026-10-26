@@ -86,6 +86,7 @@ class TurnResult:
     tags: list[str] = field(default_factory=list)
     combo: dict[str, Any] = field(default_factory=dict)
 
+    reference_sql: str | None = None
     response: AgentResponse | None = None
     error_kind: str | None = None
     error_message: str | None = None

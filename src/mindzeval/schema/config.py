@@ -232,7 +232,7 @@ ReportFormat = Literal["csv", "json", "html"]
 
 
 def _default_formats() -> list[ReportFormat]:
-    return ["csv", "json"]
+    return ["csv", "json", "html"]
 
 
 class OutputConfig(_Strict):
