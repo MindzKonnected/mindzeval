@@ -135,7 +135,12 @@ class Database:
         except QueryTimeoutError:
             raise
         except Exception as exc:
-            if getattr(exc, "pgcode", None) == _PG_QUERY_CANCELED:
+            sqlstate = getattr(exc, "sqlstate", None) or getattr(exc, "pgcode", None)
+            if (
+                sqlstate == _PG_QUERY_CANCELED
+                or type(exc).__name__ == "QueryCanceled"
+                or "canceling statement due to statement timeout" in str(exc)
+            ):
                 raise QueryTimeoutError(f"the query ran longer than {timeout:g}s") from exc
             raise DatabaseError(_first_line(exc)) from exc
         finally:

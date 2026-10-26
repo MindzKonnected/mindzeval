@@ -769,16 +769,35 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
 
         # Answer text
         answer_text = (resp.answer if resp and resp.answer else "").strip()
-        answer_html = (
-            f"""
+        if answer_text:
+            is_long = len(answer_text) > 280 or answer_text.count("\n") > 3
+            meta_span = (
+                f'<span class="answer-meta">({len(answer_text):,} chars)</span>' if is_long else ""
+            )
+            toggle_btn = (
+                '<button type="button" class="btn-sm-action btn-toggle-answer" '
+                'onclick="toggleAnswerBox(this)" aria-expanded="false">Expand ▼</button>'
+                if is_long
+                else ""
+            )
+            content_cls = "answer-content collapsible collapsed" if is_long else "answer-content"
+            answer_html = f"""
         <div class="answer-box">
-          <div class="answer-header"><strong>Agent Response Text:</strong></div>
-          <div class="answer-content">{esc(answer_text) if answer_text else '<span class="muted">(no text response)</span>'}</div>
+          <div class="answer-header">
+            <div class="answer-title-wrap">
+              <strong>Agent Response Text:</strong>
+              {meta_span}
+            </div>
+            <div class="answer-actions">
+              <button type="button" class="btn-sm-action" onclick="copyAnswerText(this)">Copy</button>
+              {toggle_btn}
+            </div>
+          </div>
+          <div class="{content_cls}">{esc(answer_text)}</div>
         </div>
         """
-            if answer_text
-            else ""
-        )
+        else:
+            answer_html = ""
 
         # Behavior & Safety Audit Details
         audit_items = []
@@ -1399,9 +1418,77 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       padding: .85rem 1rem;
       margin-bottom: 1.25rem;
       font-size: .85rem;
+      transition: all 0.2s ease;
     }
-    .answer-header { color: var(--text-dim); font-size: .78rem; text-transform: uppercase; margin-bottom: .35rem; }
-    .answer-content { color: var(--text); }
+    .answer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: .5rem;
+    }
+    .answer-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-dim);
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .answer-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: none;
+      font-weight: 500;
+    }
+    .answer-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-sm-action {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 5px;
+      cursor: pointer;
+      line-height: 1.2;
+      transition: all 0.15s ease;
+    }
+    .btn-sm-action:hover {
+      background: var(--border-subtle);
+      color: var(--text);
+      border-color: var(--border-focus);
+    }
+    .btn-sm-action.copied {
+      background: var(--pass-soft);
+      color: var(--pass);
+      border-color: var(--pass);
+    }
+    .answer-content {
+      color: var(--text);
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: inherit;
+    }
+    .answer-content.collapsible.collapsed {
+      max-height: 4.8em;
+      overflow: hidden;
+      position: relative;
+      mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    }
+    .answer-content.collapsible.expanded {
+      max-height: none;
+      overflow: visible;
+      mask-image: none;
+      -webkit-mask-image: none;
+    }
 
     /* Audit Box */
     .audit-box {
@@ -1521,6 +1608,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       align-items: flex-start;
       justify-content: space-between;
       gap: 1rem;
+      flex-shrink: 0;
     }
     .modal-title {
       font-size: 1.25rem;
@@ -1558,23 +1646,27 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     }
     .modal-tabs {
       display: flex;
-      gap: 0.4rem;
+      gap: 0.5rem;
       padding: 0.75rem 1.5rem;
       border-bottom: 1px solid var(--border-subtle);
       background: var(--bg-canvas);
       overflow-x: auto;
+      flex-shrink: 0;
+      align-items: center;
     }
     .modal-tab {
       background: var(--bg-surface);
       border: 1px solid var(--border);
       color: var(--text-muted);
-      padding: 0.4rem 0.85rem;
+      padding: 0.45rem 0.95rem;
       border-radius: 20px;
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       font-weight: 600;
       cursor: pointer;
       white-space: nowrap;
       transition: all 0.15s ease;
+      line-height: 1.2;
+      flex-shrink: 0;
     }
     .modal-tab:hover {
       color: var(--text);
@@ -1588,7 +1680,8 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     .modal-body {
       padding: 1.5rem;
       overflow-y: auto;
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
@@ -1600,6 +1693,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       justify-content: flex-end;
       background: var(--bg-surface);
       border-radius: 0 0 16px 16px;
+      flex-shrink: 0;
     }
     .btn-modal-close {
       background: var(--brand);
@@ -1889,6 +1983,33 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       const codeEl = card ? card.querySelector('.query-code code') : null;
       if (!codeEl) return;
       copyText(btn, codeEl.innerText || codeEl.textContent);
+    }
+
+    function toggleAnswerBox(btn) {
+      const box = btn.closest('.answer-box');
+      if (!box) return;
+      const content = box.querySelector('.answer-content');
+      if (!content) return;
+      const isCollapsed = content.classList.contains('collapsed');
+      if (isCollapsed) {
+        content.classList.remove('collapsed');
+        content.classList.add('expanded');
+        btn.textContent = 'Collapse ▲';
+        btn.setAttribute('aria-expanded', 'true');
+      } else {
+        content.classList.remove('expanded');
+        content.classList.add('collapsed');
+        btn.textContent = 'Expand ▼';
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    function copyAnswerText(btn) {
+      const box = btn.closest('.answer-box');
+      if (!box) return;
+      const content = box.querySelector('.answer-content');
+      if (!content) return;
+      copyText(btn, content.innerText || content.textContent);
     }
 
     function copyRunId(btn, text) {
