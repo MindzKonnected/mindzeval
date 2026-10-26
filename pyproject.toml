@@ -33,7 +33,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg2-binary>=2.9,<3"]
+postgres = [
+    "psycopg[binary]>=3.1,<4",
+    "psycopg2-binary>=2.9,<3",
+]
 # Development tools are pinned exactly so every contributor and CI run uses the
 # same versions.
 dev = [

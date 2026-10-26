@@ -185,14 +185,23 @@ def _create_engine(url: str) -> Engine:
 
     try:
         return create_engine(url, pool_pre_ping=True)
+    except ModuleNotFoundError as exc:
+        if parsed.drivername == "postgresql":
+            # SQLAlchemy 2.1+ defaults postgresql:// to 'psycopg' (v3), while
+            # SQLAlchemy 2.0 defaults to 'psycopg2' (v2). If the default driver is
+            # not found, try the alternate driver before raising an error.
+            alternate = "postgresql+psycopg2" if exc.name == "psycopg" else "postgresql+psycopg"
+            try:
+                return create_engine(parsed.set(drivername=alternate), pool_pre_ping=True)
+            except (NoSuchModuleError, ModuleNotFoundError):
+                pass
+        raise DatabaseError(
+            f"the database driver '{exc.name}' is not installed; for Postgres install "
+            "'mindzeval[postgres]'"
+        ) from None
     except NoSuchModuleError:
         raise DatabaseError(
             f"no driver installed for '{parsed.drivername}'; for Postgres install "
-            "'mindzeval[postgres]'"
-        ) from None
-    except ModuleNotFoundError as exc:
-        raise DatabaseError(
-            f"the database driver '{exc.name}' is not installed; for Postgres install "
             "'mindzeval[postgres]'"
         ) from None
 
