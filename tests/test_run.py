@@ -159,3 +159,115 @@ def test_cli_thresholds_fail_the_run(quick: Path, monkeypatch: pytest.MonkeyPatc
     )
     monkeypatch.chdir(quick)
     assert main(["run", "-q"]) == EXIT_FAILED
+
+
+def test_run_with_static_expected(write: Write, tmp_path: Path) -> None:
+    write(
+        "agent_static.py",
+        "def answer(question):\n"
+        "    if 'match' in question:\n"
+        "        return {'rows': [{'org_id': 1}, {'org_id': 2}], 'status': 'answer'}\n"
+        "    return {'rows': [{'org_id': 1}], 'status': 'answer'}\n",
+    )
+    write(
+        "cases.yaml",
+        "- id: c_match\n"
+        "  question: Please match\n"
+        "  key: org_id\n"
+        "  expected_rows: 2\n"
+        "- id: c_missing\n"
+        "  question: Please miss\n"
+        "  key: org_id\n"
+        "  expected_rows: 2\n",
+    )
+    config = write(
+        "mindzeval.yaml",
+        "agent: {type: python, target: 'agent_static:answer'}\ndatasets: cases.yaml\n",
+    )
+    project = load_project(config)
+    res = run(project)
+    r_match = next(r for r in res.results if r.case_id == "c_match")
+    r_miss = next(r for r in res.results if r.case_id == "c_missing")
+
+    # Match case
+    assert r_match.verdict is Verdict.PASS
+    assert r_match.execution is not None
+    assert r_match.execution.correct
+    assert r_match.execution.comparison is not None
+    assert r_match.execution.comparison.precision == 1.0
+    assert r_match.execution.comparison.recall == 1.0
+    assert any(f.check == "static_expected" and f.severity == "warn" for f in r_match.findings)
+
+    # Missing rows case
+    assert r_miss.verdict is Verdict.FAIL
+    assert r_miss.cause == "missing_rows"
+    assert r_miss.execution is not None
+    assert not r_miss.execution.correct
+    assert r_miss.execution.comparison is not None
+    assert r_miss.execution.comparison.recall == 0.5
+    assert any(f.check == "static_expected" and f.severity == "warn" for f in r_miss.findings)
+
+    # Reports generation check
+    written = write_reports(res, output_dir=tmp_path / "out", formats=["csv", "html"])
+    html_content = written["html"].read_text(encoding="utf-8")
+    assert "Expected Result (Static Reference)" in html_content
+    assert "static_expected" in html_content
+
+
+def test_mixed_reference_sql_and_static_suite(write: Write, tmp_path: Path, shop_db: Path) -> None:
+    write(
+        "agent_mixed.py",
+        "def answer(question):\n"
+        "    if 'german' in question.lower():\n"
+        "        return {'sql': 'SELECT id FROM customers WHERE country = \\'DE\\'', 'status': 'answer'}\n"
+        "    return {'rows': [{'org_id': 101}, {'org_id': 102}], 'status': 'answer'}\n",
+    )
+    write(
+        "cases.yaml",
+        "- id: case_with_ref_sql\n"
+        "  question: Customers in Germany\n"
+        "  key: id\n"
+        "  expected_rows: 2\n"
+        "  reference_sql: SELECT id FROM customers WHERE country = 'DE'\n"
+        "- id: case_without_ref_sql\n"
+        "  question: Startups with high funding\n"
+        "  key: org_id\n"
+        "  expected_rows: 2\n",
+    )
+    config = write(
+        "mindzeval.yaml",
+        f"database: {{url: 'sqlite:///{shop_db}'}}\n"
+        "agent: {type: python, target: 'agent_mixed:answer'}\n"
+        "datasets: cases.yaml\n",
+    )
+    project = load_project(config)
+    res = run(project)
+
+    r_with = next(r for r in res.results if r.case_id == "case_with_ref_sql")
+    r_without = next(r for r in res.results if r.case_id == "case_without_ref_sql")
+
+    # Turn with reference_sql runs live against database
+    assert r_with.verdict is Verdict.PASS
+    assert r_with.reference_sql == "SELECT id FROM customers WHERE country = 'DE'"
+    assert r_with.execution is not None and r_with.execution.correct
+    assert r_with.execution.comparison is not None
+    assert r_with.execution.comparison.reference_n == 2
+    assert r_with.execution.comparison.agent_n == 2
+    # No static_expected warning on live reference_sql turn
+    assert not any(f.check == "static_expected" for f in r_with.findings)
+
+    # Turn without reference_sql strictly compares against static expected
+    assert r_without.verdict is Verdict.PASS
+    assert r_without.reference_sql is None
+    assert r_without.execution is not None and r_without.execution.correct
+    assert r_without.execution.comparison is not None
+    assert r_without.execution.comparison.reference_n == 2
+    assert r_without.execution.comparison.agent_n == 2
+    # Has static_expected warning
+    assert any(f.check == "static_expected" for f in r_without.findings)
+
+    # Generated report shows both side-by-side
+    written = write_reports(res, output_dir=tmp_path / "out", formats=["html"])
+    html_content = written["html"].read_text(encoding="utf-8")
+    assert "Reference Query (Golden Answer)" in html_content
+    assert "Expected Result (Static Reference)" in html_content

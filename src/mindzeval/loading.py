@@ -43,6 +43,9 @@ CSV_TURN_COLUMNS = frozenset(
         "compare",
         "key",
         "expected_rows",
+        "expected_value",
+        "expected",
+        "expected_result",
         "expect_empty",
     }
 )

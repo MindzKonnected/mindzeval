@@ -105,8 +105,21 @@ def score_execution(
     if agent_table is None:
         return score
 
-    ref_table = Table(reference.columns, reference.rows)
-    score.comparison = compare(mode, ref_table, agent_table, key=turn.key, tolerance=tolerance)
+    is_static_count = (
+        turn.reference_sql is None
+        and isinstance(turn.expected_rows, int)
+        and mode is not CompareMode.SCALAR
+        and not reference.rows
+    )
+
+    if is_static_count:
+        assert isinstance(turn.expected_rows, int)
+        score.comparison = _compare_static_row_count(
+            mode, turn.expected_rows, agent_table, turn.key
+        )
+    else:
+        ref_table = Table(reference.columns, reference.rows)
+        score.comparison = compare(mode, ref_table, agent_table, key=turn.key, tolerance=tolerance)
 
     stripped, limit = strip_display_limit(response.sql) if response.sql else (None, None)
     score.truncated = bool(response.truncated) or (
@@ -139,11 +152,92 @@ def score_execution(
         except (SQLGuardError, DatabaseError) as exc:
             score.uncapped_status = f"error: {exc}"
         else:
-            score.uncapped = compare(
-                mode, ref_table, Table(full.columns, full.rows), key=turn.key, tolerance=tolerance
-            )
+            if is_static_count:
+                assert isinstance(turn.expected_rows, int)
+                score.uncapped = _compare_static_row_count(
+                    mode, turn.expected_rows, Table(full.columns, full.rows), turn.key
+                )
+            else:
+                score.uncapped = compare(
+                    mode,
+                    ref_table,
+                    Table(full.columns, full.rows),
+                    key=turn.key,
+                    tolerance=tolerance,
+                )
             score.uncapped_status = "compared"
     return score
+
+
+def _compare_static_row_count(
+    mode: CompareMode,
+    expected_n: int,
+    agent_table: Table,
+    key: list[str] | None,
+) -> Comparison:
+    agent_n = len(agent_table.rows)
+    missing_keys = [k for k in (key or []) if agent_table.column_index(k) is None]
+    if missing_keys:
+        return Comparison(
+            mode=mode,
+            correct=False,
+            code="missing_columns",
+            reason=f"agent output is missing key column(s): {', '.join(missing_keys)}",
+            reference_n=expected_n,
+            agent_n=agent_n,
+            precision=0.0,
+            recall=0.0,
+            f1=0.0,
+            set_match=False,
+            ordered_match=False,
+        )
+    if agent_n == expected_n:
+        return Comparison(
+            mode=mode,
+            correct=True,
+            code="match",
+            reason=f"matched {expected_n} expected rows",
+            reference_n=expected_n,
+            agent_n=agent_n,
+            precision=1.0,
+            recall=1.0,
+            f1=1.0,
+            set_match=True,
+            ordered_match=True,
+        )
+    if agent_n < expected_n:
+        rec = round(agent_n / expected_n, 4) if expected_n else 0.0
+        f1_val = round(2 * rec / (1.0 + rec), 4) if rec else 0.0
+        return Comparison(
+            mode=mode,
+            correct=False,
+            code="missing_rows",
+            reason=f"expected {expected_n} rows, got {agent_n} (missing {expected_n - agent_n})",
+            reference_n=expected_n,
+            agent_n=agent_n,
+            precision=1.0,
+            recall=rec,
+            f1=f1_val,
+            set_match=False,
+            ordered_match=False,
+            missing_n=expected_n - agent_n,
+        )
+    prec = round(expected_n / agent_n, 4) if agent_n else 0.0
+    f1_val = round(2 * prec / (1.0 + prec), 4) if prec else 0.0
+    return Comparison(
+        mode=mode,
+        correct=False,
+        code="extra_rows",
+        reason=f"expected {expected_n} rows, got {agent_n} (extra {agent_n - expected_n})",
+        reference_n=expected_n,
+        agent_n=agent_n,
+        precision=prec,
+        recall=1.0,
+        f1=f1_val,
+        set_match=False,
+        ordered_match=False,
+        spurious_n=agent_n - expected_n,
+    )
 
 
 def _params(params: dict[str, Any] | list[Any] | None) -> Any:

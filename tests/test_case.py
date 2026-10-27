@@ -102,3 +102,38 @@ def test_tolerance_override_applies_only_set_fields() -> None:
     assert merged.relative == 0.01 and merged.extra_columns == "forbid"
     assert merged.absolute == base.absolute
     assert ToleranceOverride().apply(base) is base
+
+
+def test_static_expected_without_reference_sql() -> None:
+    c1 = case(question="Startups", expected_rows=160, key="org_id")
+    t1 = c1.turns[0]
+    assert t1.compare is CompareMode.SET
+    assert t1.expected_behavior is Behavior.ANSWER
+    assert t1.has_static_expected
+    assert t1.reference_sql is None
+
+    c2 = case(question="Startups", expected_rows=160)
+    t2 = c2.turns[0]
+    assert t2.compare is CompareMode.TABLE
+
+    c3 = case(
+        question="Startups",
+        expected_rows=[{"org_id": "1"}, {"org_id": "2"}],
+        key="org_id",
+    )
+    t3 = c3.turns[0]
+    assert t3.compare is CompareMode.SET
+    ref3 = t3.build_static_reference()
+    assert ref3.row_count == 2
+    assert "org_id" in ref3.columns
+
+    c4 = case(question="Count", expected_value=42)
+    t4 = c4.turns[0]
+    assert t4.compare is CompareMode.SCALAR
+    ref4 = t4.build_static_reference()
+    assert ref4.rows == [(42,)]
+
+    c5 = case(question="Empty", expect_empty=True)
+    t5 = c5.turns[0]
+    assert t5.has_static_expected
+    assert t5.compare is CompareMode.TABLE

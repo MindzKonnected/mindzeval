@@ -137,8 +137,14 @@ class Turn(BaseModel):
 
     expect: Expectation = Field(default_factory=Expectation)
     tolerance: ToleranceOverride | None = None
-    expected_rows: int | None = Field(default=None, ge=0)
-    """Row count the reference returned when the case was written. Used for drift checks."""
+    expected_rows: int | list[dict[str, Any]] | None = None
+    """Row count or expected rows. When reference_sql is given, used for drift checks."""
+
+    expected_value: Any | None = Field(
+        default=None,
+        validation_alias=AliasChoices("expected_value", "expected", "expected_result"),
+    )
+    """Expected scalar value or dataset when reference_sql is omitted."""
 
     expect_empty: bool = False
     """Set when an empty reference result is the correct answer."""
@@ -149,6 +155,33 @@ class Turn(BaseModel):
         if isinstance(value, str):
             return [value]
         return value
+
+    @field_validator("expected_rows", mode="before")
+    @classmethod
+    def _coerce_expected_rows(cls, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                pass
+        return value
+
+    @field_validator("expected_rows")
+    @classmethod
+    def _validate_expected_rows(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            if value < 0:
+                raise ValueError("expected_rows count cannot be negative")
+            return value
+        if isinstance(value, (list, tuple)):
+            if not all(isinstance(r, dict) for r in value):
+                raise ValueError("expected_rows as a list must contain dictionaries for each row")
+            return list(value)
+        raise ValueError("expected_rows must be an integer count or a list of row dictionaries")
 
     @field_validator("key")
     @classmethod
@@ -167,19 +200,42 @@ class Turn(BaseModel):
             raise ValueError("reference_sql must not be blank; omit it instead")
         return value
 
+    @property
+    def has_static_expected(self) -> bool:
+        """True if the turn provides a static expected result without reference_sql."""
+        return (
+            self.expected_rows is not None or self.expected_value is not None or self.expect_empty
+        )
+
     @model_validator(mode="after")
     def _resolve_and_check(self) -> Turn:
         if self.compare is None:
             if self.reference_sql is None:
-                self.compare = CompareMode.NONE
+                if self.has_static_expected:
+                    if self.expected_value is not None and not isinstance(
+                        self.expected_value, list
+                    ):
+                        self.compare = CompareMode.SCALAR
+                    elif self.key:
+                        self.compare = CompareMode.SET
+                    else:
+                        self.compare = CompareMode.TABLE
+                else:
+                    self.compare = CompareMode.NONE
             elif self.key:
                 self.compare = CompareMode.SET
             else:
                 self.compare = CompareMode.TABLE
 
         behavior = self.expect.behavior
-        if self.compare is not CompareMode.NONE and self.reference_sql is None:
-            raise ValueError(f"compare '{self.compare}' needs a reference_sql")
+        if (
+            self.compare is not CompareMode.NONE
+            and self.reference_sql is None
+            and not self.has_static_expected
+        ):
+            raise ValueError(
+                f"compare '{self.compare}' needs a reference_sql or an expected result"
+            )
         if self.compare in KEYED_MODES and not self.key:
             raise ValueError(
                 f"compare '{self.compare}' needs a key: the column(s) that identify a record"
@@ -188,21 +244,72 @@ class Turn(BaseModel):
             raise ValueError(
                 f"a turn that expects the agent to {behavior} cannot also have a reference_sql"
             )
-        if self.compare is CompareMode.NONE and behavior is None and not self.expect.trace:
+        if (
+            self.compare is CompareMode.NONE
+            and behavior is None
+            and not self.expect.trace
+            and not self.has_static_expected
+        ):
             raise ValueError(
-                "this turn checks nothing: add a reference_sql, an expected behavior, "
-                "or trace assertions"
+                "this turn checks nothing: add a reference_sql, an expected result, "
+                "an expected behavior, or trace assertions"
             )
-        if self.expect_empty and self.expected_rows not in (None, 0):
+        if self.expect_empty and isinstance(self.expected_rows, int) and self.expected_rows != 0:
             raise ValueError("expect_empty is set but expected_rows is not 0")
         return self
 
     @property
     def expected_behavior(self) -> Behavior | None:
-        """The behaviour to score: explicit, or ``answer`` when a reference is given."""
+        """The behaviour to score: explicit, or ``answer`` when a reference or expected result is given."""
         if self.expect.behavior is not None:
             return self.expect.behavior
-        return Behavior.ANSWER if self.reference_sql is not None else None
+        return (
+            Behavior.ANSWER
+            if (self.reference_sql is not None or self.has_static_expected)
+            else None
+        )
+
+    def build_static_reference(self) -> Any:
+        """Build a synthetic QueryResult from the turn's static expected result."""
+        from mindzeval.db import QueryResult
+        from mindzeval.scoring.compare import Table
+
+        if self.expect_empty:
+            return QueryResult(columns=(), rows=[], _row_count=0)
+
+        if self.expected_rows is not None:
+            if isinstance(self.expected_rows, list):
+                table = Table.from_dicts(self.expected_rows)
+                return QueryResult(
+                    columns=table.columns,
+                    rows=table.rows,
+                )
+            if isinstance(self.expected_rows, int):
+                if self.compare is CompareMode.SCALAR:
+                    return QueryResult(
+                        columns=("value",),
+                        rows=[(self.expected_rows,)],
+                    )
+                return QueryResult(
+                    columns=tuple(self.key or ()),
+                    rows=[],
+                    _row_count=self.expected_rows,
+                )
+
+        if self.expected_value is not None:
+            val = self.expected_value
+            if isinstance(val, list) and val and isinstance(val[0], dict):
+                table = Table.from_dicts(val)
+                return QueryResult(
+                    columns=table.columns,
+                    rows=table.rows,
+                )
+            return QueryResult(
+                columns=("value",),
+                rows=[(val,)],
+            )
+
+        return None
 
 
 # Fields that describe a single turn. With ``turns`` they are not allowed at the

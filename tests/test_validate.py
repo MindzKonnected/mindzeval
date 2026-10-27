@@ -143,3 +143,16 @@ def test_orphans_on_views_need_configured_relationships(linked_db: Path) -> None
     assert _findings(linked_db, cases)["view"] == []
     config = ValidationConfig(relationships=["v_orders.customer_id -> customers.id"])
     assert _findings(linked_db, cases, config)["view"] == ["orphans"]
+
+
+def test_static_expected_validation(linked_db: Path) -> None:
+    cases = _cases({"id": "static_case", "expected_rows": 160, "key": "org_id"})
+    with Database(f"sqlite:///{linked_db}") as db:
+        report = validate_cases(cases, db, ValidationConfig())
+    check = report.get("static_case", 0)
+    assert check is not None
+    assert check.result is not None
+    assert check.result.row_count == 160
+    assert len(check.findings) == 1
+    assert check.findings[0].check == "static_expected"
+    assert check.findings[0].severity == "warn"

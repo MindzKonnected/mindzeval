@@ -201,6 +201,20 @@ async def _run_case(
     history: list[Message] = []
     for index, turn in enumerate(case.turns):
         check = validation.get(case.id, index) if validation else None
+        findings = list(check.findings) if check else []
+        if (
+            turn.reference_sql is None
+            and turn.has_static_expected
+            and not any(f.check == "static_expected" for f in findings)
+        ):
+            findings.append(
+                Finding(
+                    "static_expected",
+                    "warn",
+                    "no reference_sql provided; evaluated against static expected result",
+                )
+            )
+
         result = TurnResult(
             case_id=case.id,
             turn=index,
@@ -211,7 +225,7 @@ async def _run_case(
             difficulty=case.difficulty,
             tags=list(case.tags),
             combo=dict(combo),
-            findings=list(check.findings) if check else [],
+            findings=findings,
             blocked=bool(check and check.blocked),
             reference_sql=turn.reference_sql,
         )
@@ -235,7 +249,7 @@ async def _run_case(
         except AgentError as exc:
             result.latency_ms = (time.perf_counter() - started) * 1000
             result.error_kind, result.error_message = str(exc.kind), exc.message
-            decide(result, expects_execution=turn.reference_sql is not None)
+            decide(result, expects_execution=bool(turn.reference_sql or turn.has_static_expected))
             await report(result)
             history.append(Message("user", turn.question))
             continue
@@ -244,7 +258,11 @@ async def _run_case(
 
         if not result.blocked:
             await asyncio.to_thread(_score, result, case, index, check, db, config, scorers, params)
-        decide(result, expects_execution=turn.reference_sql is not None and not result.blocked)
+        decide(
+            result,
+            expects_execution=bool(turn.reference_sql or turn.has_static_expected)
+            and not result.blocked,
+        )
         await report(result)
 
         history.append(Message("user", turn.question))
@@ -271,8 +289,11 @@ def _score(
     result.behavior = score_behavior(turn, response, enabled=config.scoring.behavior)
 
     reference = check.result if check is not None else None
+    if reference is None and turn.reference_sql is None and turn.has_static_expected:
+        reference = turn.build_static_reference()
+
     if (
-        turn.reference_sql is not None
+        (turn.reference_sql is not None or turn.has_static_expected)
         and turn.compare is not CompareMode.NONE
         and reference is not None
     ):

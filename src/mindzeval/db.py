@@ -42,10 +42,11 @@ class QueryResult:
     rows: list[tuple[Any, ...]]
     elapsed_ms: float = 0.0
     sql: str = field(default="", repr=False)
+    _row_count: int | None = field(default=None, repr=False)
 
     @property
     def row_count(self) -> int:
-        return len(self.rows)
+        return self._row_count if self._row_count is not None else len(self.rows)
 
     def as_dicts(self) -> list[dict[str, Any]]:
         """Rows as dicts. Repeated column names get a ``_2``, ``_3`` suffix."""

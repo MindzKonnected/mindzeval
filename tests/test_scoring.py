@@ -187,3 +187,63 @@ def test_blocked_and_not_scored() -> None:
     nothing = _result(response=response, behavior=score_behavior(t, response))
     decide(nothing, expects_execution=False)
     assert nothing.verdict is Verdict.NOT_SCORED and "status" in nothing.reason
+
+
+def test_score_execution_static_row_count(db: Database) -> None:
+    t = turn(expected_rows=3, key="id")
+    ref = t.build_static_reference()
+
+    # Exact match
+    resp_match = AgentResponse(rows=[{"id": 1}, {"id": 2}, {"id": 3}])
+    score_match = score_execution(t, resp_match, ref, db=db, tolerance=Tolerance())
+    assert score_match.correct
+    assert score_match.comparison is not None
+    assert score_match.comparison.code == "match"
+    assert score_match.comparison.precision == 1.0
+    assert score_match.comparison.recall == 1.0
+    assert score_match.comparison.f1 == 1.0
+
+    # Missing rows
+    resp_miss = AgentResponse(rows=[{"id": 1}, {"id": 2}])
+    score_miss = score_execution(t, resp_miss, ref, db=db, tolerance=Tolerance())
+    assert not score_miss.correct
+    assert score_miss.comparison is not None
+    assert score_miss.comparison.code == "missing_rows"
+    assert score_miss.comparison.recall == round(2 / 3, 4)
+    assert score_miss.comparison.precision == 1.0
+
+    # Extra rows
+    resp_extra = AgentResponse(rows=[{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}])
+    score_extra = score_execution(t, resp_extra, ref, db=db, tolerance=Tolerance())
+    assert not score_extra.correct
+    assert score_extra.comparison is not None
+    assert score_extra.comparison.code == "extra_rows"
+    assert score_extra.comparison.precision == round(3 / 4, 4)
+    assert score_extra.comparison.recall == 1.0
+
+    # Missing key column
+    resp_nokey = AgentResponse(rows=[{"name": "a"}, {"name": "b"}, {"name": "c"}])
+    score_nokey = score_execution(t, resp_nokey, ref, db=db, tolerance=Tolerance())
+    assert not score_nokey.correct
+    assert score_nokey.comparison is not None
+    assert score_nokey.comparison.code == "missing_columns"
+
+
+def test_score_execution_static_dataset(db: Database) -> None:
+    t = turn(expected_rows=[{"id": 1, "country": "DE"}, {"id": 2, "country": "FR"}], key="id")
+    ref = t.build_static_reference()
+
+    resp = AgentResponse(rows=[{"id": 1, "country": "DE"}, {"id": 2, "country": "FR"}])
+    score = score_execution(t, resp, ref, db=db, tolerance=Tolerance())
+    assert score.correct
+    assert score.comparison is not None and score.comparison.code == "match"
+
+
+def test_score_execution_static_scalar(db: Database) -> None:
+    t = turn(expected_value=42)
+    ref = t.build_static_reference()
+
+    resp = AgentResponse(rows=[{"val": 42}])
+    score = score_execution(t, resp, ref, db=db, tolerance=Tolerance())
+    assert score.correct
+    assert score.comparison is not None and score.comparison.code == "match"

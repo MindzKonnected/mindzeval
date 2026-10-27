@@ -844,8 +844,16 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         cause_html = f'<span class="cause-tag">{esc(r.cause)}</span>' if r.cause else ""
         reason_text = esc(r.reason) if r.reason else "All checks passed"
         rescue_note = ""
-        if e_score and e_score.truncated_subset and e_score.uncapped_correct:
-            rescue_note = '<div class="rescue-note">✨ <strong>Logic Correct:</strong> UI display limit truncated the query, but uncapped replay matched the reference exactly.</div>'
+        ref_title = (
+            "Reference Query (Golden Answer)"
+            if ref_sql_raw
+            else "Expected Result (Static Reference)"
+        )
+        ref_code_display = (
+            ref_sql_highlighted
+            if ref_sql_raw
+            else '<span style="color: var(--text-dim); font-style: italic;">-- No reference SQL provided (scored against static expected result)</span>'
+        )
 
         card_html = f"""
         <div class="turn-card status-{v_class}" data-verdict="{r.verdict}" data-category="{esc(r.category or "")}" data-combo="{esc(r.combo_label)}" data-search="{esc(search_terms)}">
@@ -892,12 +900,12 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
                 <div class="query-card">
                   <div class="query-card-header">
                     <div class="query-card-title">
-                      <span class="icon-ref">🎯</span> Reference Query (Golden Answer)
+                      <span class="icon-ref">🎯</span> {ref_title}
                       <span class="query-source-tag source-golden">mode: {esc(r.compare)}</span>
                     </div>
                     {'<button class="btn-copy" onclick="copyCardSql(this)">Copy SQL</button>' if ref_sql_raw else ""}
                   </div>
-                  <pre class="query-code"><code>{ref_sql_highlighted}</code></pre>
+                  <pre class="query-code"><code>{ref_code_display}</code></pre>
                 </div>
               </div>
             </div>
@@ -1848,6 +1856,93 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     .empty-title { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: .25rem; }
     .empty-desc { font-size: .85rem; color: var(--text-muted); margin-bottom: 1rem; }
 
+    /* Pagination Bar */
+    .pagination-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding: 0.85rem 1.25rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-top: 1.25rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      box-shadow: var(--shadow-sm);
+    }
+    .pagination-info {
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .pagination-info span {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .pagination-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .pagination-numbers {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .btn-page {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      min-width: 34px;
+      height: 34px;
+      padding: 0 0.5rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      line-height: 1;
+    }
+    .btn-page:hover:not(:disabled) {
+      background: var(--border-subtle);
+      color: var(--text);
+      border-color: var(--border-focus);
+    }
+    .btn-page.active {
+      background: var(--brand);
+      color: #ffffff;
+      border-color: var(--brand);
+    }
+    .btn-page:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .page-ellipsis {
+      padding: 0 0.35rem;
+      color: var(--text-dim);
+      font-weight: 600;
+      user-select: none;
+    }
+    .pagination-size {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .page-size-select {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      outline: none;
+      cursor: pointer;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .top-header-inner { flex-direction: column; height: auto; padding: 1rem 0; gap: .75rem; }
@@ -1857,12 +1952,14 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       .turn-header { flex-direction: column; align-items: flex-start; gap: .5rem; }
       .turn-header-left { width: 100%; }
       .turn-header-right { width: 100%; justify-content: flex-start; }
+      .pagination-bar { flex-direction: column; align-items: center; gap: 0.75rem; text-align: center; }
+      .pagination-controls { flex-wrap: wrap; justify-content: center; }
     }
 
     /* Print styles for PDF and reports */
     @media print {
       body { background: #fff !important; color: #000 !important; }
-      .top-header, .toolbar, .btn-theme, .btn-copy, .btn-action, .btn-guide-pill, .metric-info-btn, .modal-backdrop { display: none !important; }
+      .top-header, .toolbar, .btn-theme, .btn-copy, .btn-action, .btn-guide-pill, .metric-info-btn, .modal-backdrop, .pagination-bar { display: none !important; }
       .turn-card .turn-body { display: block !important; }
       .turn-card { break-inside: avoid; border: 1px solid #ccc !important; margin-bottom: 1rem !important; }
       .container { max-width: 100% !important; padding: 0 !important; }
@@ -1907,6 +2004,15 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       filterTurns();
     }
 
+    let currentPage = 1;
+    let pageSize = 25;
+    let currentFilteredCards = [];
+
+    function initPagination() {
+      currentFilteredCards = Array.from(document.querySelectorAll('.turn-card'));
+      renderPagination(false);
+    }
+
     function filterTurns() {
       const query = document.getElementById('search-input').value.toLowerCase().trim();
       const activeTab = document.querySelector('.filter-tab.active');
@@ -1916,8 +2022,8 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       const comboEl = document.getElementById('combo-filter');
       const comboFilter = comboEl ? comboEl.value : 'all';
 
-      let visible = 0;
-      document.querySelectorAll('.turn-card').forEach(card => {
+      const allCards = Array.from(document.querySelectorAll('.turn-card'));
+      currentFilteredCards = allCards.filter(card => {
         const v = card.dataset.verdict;
         const cat = card.dataset.category;
         const combo = card.dataset.combo;
@@ -1928,18 +2034,130 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         const matchCombo = (comboFilter === 'all' || combo === comboFilter);
         const matchQuery = (!query || search.includes(query));
 
-        if (matchVerdict && matchCat && matchCombo && matchQuery) {
-          card.style.display = '';
-          visible++;
-        } else {
-          card.style.display = 'none';
-        }
+        return matchVerdict && matchCat && matchCombo && matchQuery;
       });
-      document.getElementById('visible-count').textContent = visible;
+
+      currentPage = 1;
+      renderPagination(false);
+    }
+
+    function changePageSize(size) {
+      if (size === 'all') {
+        pageSize = -1;
+      } else {
+        pageSize = parseInt(size, 10) || 25;
+      }
+      currentPage = 1;
+      renderPagination(false);
+    }
+
+    function goToPage(page) {
+      const total = currentFilteredCards.length;
+      const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
+      if (page < 1) page = 1;
+      if (page > totalPages) page = totalPages;
+      currentPage = page;
+      renderPagination(true);
+    }
+
+    function renderPagination(shouldScroll) {
+      const total = currentFilteredCards.length;
+      const allCards = document.querySelectorAll('.turn-card');
+
+      allCards.forEach(c => c.style.display = 'none');
+
+      const visibleCountEl = document.getElementById('visible-count');
+      if (visibleCountEl) visibleCountEl.textContent = total;
+
       const emptyEl = document.getElementById('cards-empty');
       if (emptyEl) {
-        emptyEl.style.display = (visible === 0) ? 'block' : 'none';
+        emptyEl.style.display = (total === 0) ? 'block' : 'none';
       }
+
+      const paginationBar = document.getElementById('pagination-bar');
+      if (total === 0) {
+        if (paginationBar) paginationBar.style.display = 'none';
+        return;
+      }
+      if (paginationBar) paginationBar.style.display = 'flex';
+
+      const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      let startIdx = 0;
+      let endIdx = total;
+      if (pageSize !== -1) {
+        startIdx = (currentPage - 1) * pageSize;
+        endIdx = Math.min(startIdx + pageSize, total);
+      }
+
+      for (let i = startIdx; i < endIdx; i++) {
+        if (currentFilteredCards[i]) {
+          currentFilteredCards[i].style.display = '';
+        }
+      }
+
+      const startEl = document.getElementById('page-range-start');
+      const endEl = document.getElementById('page-range-end');
+      const totalEl = document.getElementById('page-total-count');
+      if (startEl) startEl.textContent = total > 0 ? (startIdx + 1) : 0;
+      if (endEl) endEl.textContent = endIdx;
+      if (totalEl) totalEl.textContent = total;
+
+      const btnFirst = document.getElementById('btn-page-first');
+      const btnPrev = document.getElementById('btn-page-prev');
+      const btnNext = document.getElementById('btn-page-next');
+      const btnLast = document.getElementById('btn-page-last');
+
+      if (btnFirst) btnFirst.disabled = (currentPage === 1);
+      if (btnPrev) btnPrev.disabled = (currentPage === 1);
+      if (btnNext) btnNext.disabled = (currentPage === totalPages);
+      if (btnLast) btnLast.disabled = (currentPage === totalPages);
+
+      const numbersContainer = document.getElementById('pagination-numbers');
+      if (numbersContainer) {
+        numbersContainer.innerHTML = '';
+        if (totalPages > 1) {
+          const pageNumbers = getPageNumbers(currentPage, totalPages);
+          pageNumbers.forEach(p => {
+            if (p === '...') {
+              const ellipsis = document.createElement('span');
+              ellipsis.className = 'page-ellipsis';
+              ellipsis.textContent = '...';
+              numbersContainer.appendChild(ellipsis);
+            } else {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'btn-page' + (p === currentPage ? ' active' : '');
+              btn.textContent = p;
+              btn.onclick = () => goToPage(p);
+              numbersContainer.appendChild(btn);
+            }
+          });
+        }
+      }
+
+      if (shouldScroll) {
+        const explorer = document.querySelector('.explorer-header');
+        if (explorer) {
+          explorer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+    }
+
+    function getPageNumbers(current, total) {
+      if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+      }
+      const pages = [];
+      if (current <= 4) {
+        pages.push(1, 2, 3, 4, 5, '...', total);
+      } else if (current >= total - 3) {
+        pages.push(1, '...', total - 4, total - 3, total - 2, total - 1, total);
+      } else {
+        pages.push(1, '...', current - 1, current, current + 1, '...', total);
+      }
+      return pages;
     }
 
     function copyText(btn, text) {
@@ -2102,6 +2320,9 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         }
       }
     });
+
+    // Initialize pagination on page load
+    initPagination();
     """
 
     metrics_modal_html = """
@@ -2416,6 +2637,30 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         <div class="empty-title">No matching test cases found</div>
         <div class="empty-desc">Try clearing your search query or switching your filters.</div>
         <button type="button" class="btn-action" onclick="resetFilters()">Reset All Filters</button>
+      </div>
+    </div>
+
+    <!-- Pagination Controls -->
+    <div class="pagination-bar" id="pagination-bar">
+      <div class="pagination-info">
+        Showing <span id="page-range-start">1</span>&ndash;<span id="page-range-end">25</span> of <span id="page-total-count">{len(run.results)}</span> turns
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="btn-page" id="btn-page-first" onclick="goToPage(1)" title="First Page">&laquo;</button>
+        <button type="button" class="btn-page" id="btn-page-prev" onclick="goToPage(currentPage - 1)" title="Previous Page">&lsaquo;</button>
+        <div class="pagination-numbers" id="pagination-numbers"></div>
+        <button type="button" class="btn-page" id="btn-page-next" onclick="goToPage(currentPage + 1)" title="Next Page">&rsaquo;</button>
+        <button type="button" class="btn-page" id="btn-page-last" onclick="goToPage(totalPages)" title="Last Page">&raquo;</button>
+      </div>
+      <div class="pagination-size">
+        <label for="page-size-select">Per page:</label>
+        <select id="page-size-select" class="page-size-select" onchange="changePageSize(this.value)">
+          <option value="10">10</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="all">All</option>
+        </select>
       </div>
     </div>
 

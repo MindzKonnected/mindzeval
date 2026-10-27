@@ -72,6 +72,19 @@ def validate_cases(
     for case in cases:
         for index, turn in enumerate(case.turns):
             if turn.reference_sql is None:
+                if turn.has_static_expected:
+                    report.turns[(case.id, index)] = TurnValidation(
+                        case_id=case.id,
+                        turn=index,
+                        result=turn.build_static_reference(),
+                        findings=[
+                            Finding(
+                                "static_expected",
+                                "warn",
+                                "no reference_sql provided; evaluated against static expected result",
+                            )
+                        ],
+                    )
                 continue
             report.turns[(case.id, index)] = validate_turn(turn, case.id, index, db, config, probe)
     return report
