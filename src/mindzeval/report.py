@@ -493,6 +493,126 @@ def _highlight_sql(sql: str | None) -> str:
     return "".join(parts)
 
 
+def _render_markdown(text: str) -> str:
+    """Render markdown into safe HTML, supporting tables, bold, italic, code, and lists."""
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    html_parts: list[str] = []
+    i = 0
+    n = len(lines)
+
+    def format_inline(s: str) -> str:
+        s = html.escape(s)
+        s = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", s)
+        s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+        s = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", s)
+        s = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", s)
+        s = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"<em>\1</em>", s)
+        return s
+
+    def is_separator(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped or "|" not in stripped:
+            return False
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        return bool(cells) and all(re.match(r"^:?-+:?$", c) for c in cells)
+
+    def parse_row(line: str) -> list[str]:
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            stripped = stripped[1:]
+        if stripped.endswith("|"):
+            stripped = stripped[:-1]
+        return [c.strip() for c in stripped.split("|")]
+
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+
+        # Code block: ```
+        if stripped.startswith("```"):
+            code_lines: list[str] = []
+            i += 1
+            while i < n and not lines[i].strip().startswith("```"):
+                code_lines.append(html.escape(lines[i]))
+                i += 1
+            if i < n:
+                i += 1
+            code_content = "\n".join(code_lines)
+            html_parts.append(f'<pre class="md-code-block"><code>{code_content}</code></pre>')
+            continue
+
+        # Markdown table: current line contains '|' and next line is a separator line
+        if "|" in line and i + 1 < n and is_separator(lines[i + 1]):
+            headers = parse_row(line)
+            alignments: list[str] = []
+            for sep in parse_row(lines[i + 1]):
+                if sep.startswith(":") and sep.endswith(":"):
+                    alignments.append("center")
+                elif sep.endswith(":"):
+                    alignments.append("right")
+                else:
+                    alignments.append("left")
+            i += 2
+
+            rows: list[list[str]] = []
+            while i < n and "|" in lines[i] and lines[i].strip():
+                rows.append(parse_row(lines[i]))
+                i += 1
+
+            th_cells = []
+            for col_idx, h in enumerate(headers):
+                align = alignments[col_idx] if col_idx < len(alignments) else "left"
+                th_cells.append(f'<th style="text-align:{align};">{format_inline(h)}</th>')
+            thead = f"<thead><tr>{''.join(th_cells)}</tr></thead>"
+
+            tb_rows = []
+            for r in rows:
+                td_cells = []
+                for col_idx, c in enumerate(r):
+                    align = alignments[col_idx] if col_idx < len(alignments) else "left"
+                    td_cells.append(f'<td style="text-align:{align};">{format_inline(c)}</td>')
+                tb_rows.append(f"<tr>{''.join(td_cells)}</tr>")
+            tbody = f"<tbody>{''.join(tb_rows)}</tbody>"
+
+            html_parts.append(
+                f'<div class="md-table-wrap"><table class="md-table">{thead}{tbody}</table></div>'
+            )
+            continue
+
+        # Bullet list item
+        if stripped.startswith(("- ", "* ")):
+            list_items: list[str] = []
+            while i < n and lines[i].strip().startswith(("- ", "* ")):
+                item_text = lines[i].strip()[2:].strip()
+                list_items.append(f"<li>{format_inline(item_text)}</li>")
+                i += 1
+            html_parts.append(f'<ul class="md-list">{"".join(list_items)}</ul>')
+            continue
+
+        # Blank line
+        if not stripped:
+            i += 1
+            continue
+
+        # Paragraph
+        para_lines: list[str] = []
+        while (
+            i < n
+            and lines[i].strip()
+            and not lines[i].strip().startswith("```")
+            and not ("|" in lines[i] and i + 1 < n and is_separator(lines[i + 1]))
+            and not lines[i].strip().startswith(("- ", "* "))
+        ):
+            para_lines.append(format_inline(lines[i]))
+            i += 1
+        html_parts.append(f'<p class="md-para">{"<br>".join(para_lines)}</p>')
+
+    return "".join(html_parts)
+
+
 def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     """Render a comprehensive, self-contained interactive mini-dashboard."""
     esc = html.escape
@@ -781,19 +901,33 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
                 else ""
             )
             content_cls = "answer-content collapsible collapsed" if is_long else "answer-content"
+            rendered_md = _render_markdown(answer_text)
+            has_table = '<table class="md-table">' in rendered_md
+            table_badge = (
+                '<span class="answer-table-badge">📊 Table View</span>' if has_table else ""
+            )
+            view_mode_btn = (
+                '<button type="button" class="btn-sm-action btn-view-mode" '
+                'onclick="toggleAnswerViewMode(this)" title="Toggle between formatted and raw markdown">Raw</button>'
+                if (has_table or "**" in answer_text or "`" in answer_text)
+                else ""
+            )
             answer_html = f"""
-        <div class="answer-box">
+        <div class="answer-box" data-raw="{esc(answer_text)}">
           <div class="answer-header">
             <div class="answer-title-wrap">
               <strong>Agent Response Text:</strong>
               {meta_span}
+              {table_badge}
             </div>
             <div class="answer-actions">
               <button type="button" class="btn-sm-action" onclick="copyAnswerText(this)">Copy</button>
+              {view_mode_btn}
               {toggle_btn}
             </div>
           </div>
-          <div class="{content_cls}">{esc(answer_text)}</div>
+          <div class="{content_cls} answer-rendered">{rendered_md}</div>
+          <pre class="{content_cls} answer-raw" style="display:none; white-space:pre-wrap; font-family:var(--font-mono, monospace);">{esc(answer_text)}</pre>
         </div>
         """
         else:
@@ -1480,12 +1614,19 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     .answer-content {
       color: var(--text);
       line-height: 1.5;
-      white-space: pre-wrap;
       word-break: break-word;
       font-family: inherit;
     }
+    .answer-content.answer-raw {
+      font-size: 0.82rem;
+      background: var(--bg);
+      padding: 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      margin: 0.35rem 0 0 0;
+    }
     .answer-content.collapsible.collapsed {
-      max-height: 4.8em;
+      max-height: 6.2em;
       overflow: hidden;
       position: relative;
       mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
@@ -1496,6 +1637,85 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       overflow: visible;
       mask-image: none;
       -webkit-mask-image: none;
+    }
+    .answer-table-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 12px;
+      padding: 0.12rem 0.5rem;
+      margin-left: 0.4rem;
+    }
+
+    /* Markdown Elements in Agent Response */
+    .md-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      margin: 0.6rem 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-surface);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    .md-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      text-align: left;
+    }
+    .md-table th {
+      background: var(--bg-hover);
+      color: var(--text-dim);
+      font-weight: 700;
+      padding: 0.6rem 0.85rem;
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
+    }
+    .md-table td {
+      padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      vertical-align: top;
+      line-height: 1.45;
+    }
+    .md-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+    .md-table tbody tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .md-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .md-para {
+      margin: 0.35rem 0;
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .md-list {
+      margin: 0.4rem 0 0.4rem 1.4rem;
+      padding: 0;
+      color: var(--text);
+    }
+    .md-list li {
+      margin-bottom: 0.2rem;
+    }
+    .md-code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 0.85rem;
+      overflow-x: auto;
+      font-size: 0.8rem;
+      margin: 0.5rem 0;
     }
 
     /* Audit Box */
@@ -2206,25 +2426,51 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     function toggleAnswerBox(btn) {
       const box = btn.closest('.answer-box');
       if (!box) return;
-      const content = box.querySelector('.answer-content');
-      if (!content) return;
-      const isCollapsed = content.classList.contains('collapsed');
+      const contents = box.querySelectorAll('.answer-content');
+      if (!contents.length) return;
+      const isCollapsed = contents[0].classList.contains('collapsed');
       if (isCollapsed) {
-        content.classList.remove('collapsed');
-        content.classList.add('expanded');
+        contents.forEach(c => {
+          c.classList.remove('collapsed');
+          c.classList.add('expanded');
+        });
         btn.textContent = 'Collapse ▲';
         btn.setAttribute('aria-expanded', 'true');
       } else {
-        content.classList.remove('expanded');
-        content.classList.add('collapsed');
+        contents.forEach(c => {
+          c.classList.remove('expanded');
+          c.classList.add('collapsed');
+        });
         btn.textContent = 'Expand ▼';
         btn.setAttribute('aria-expanded', 'false');
+      }
+    }
+
+    function toggleAnswerViewMode(btn) {
+      const box = btn.closest('.answer-box');
+      if (!box) return;
+      const rendered = box.querySelector('.answer-rendered');
+      const raw = box.querySelector('.answer-raw');
+      if (!rendered || !raw) return;
+      if (raw.style.display === 'none') {
+        raw.style.display = 'block';
+        rendered.style.display = 'none';
+        btn.textContent = 'Formatted';
+      } else {
+        raw.style.display = 'none';
+        rendered.style.display = 'block';
+        btn.textContent = 'Raw';
       }
     }
 
     function copyAnswerText(btn) {
       const box = btn.closest('.answer-box');
       if (!box) return;
+      const raw = box.getAttribute('data-raw');
+      if (raw) {
+        copyText(btn, raw);
+        return;
+      }
       const content = box.querySelector('.answer-content');
       if (!content) return;
       copyText(btn, content.innerText || content.textContent);
