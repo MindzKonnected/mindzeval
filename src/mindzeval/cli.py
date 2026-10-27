@@ -225,6 +225,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return EXIT_USAGE
     print("-" * 64)
 
+    def on_start(case_id: str, turn: int, current: int, total: int) -> None:
+        if args.quiet:
+            return
+        label = case_id + (f"#{turn}" if turn else "")
+        combo = f" [{label}]" if len(combos) > 1 else ""
+        if sys.stdout.isatty():
+            sys.stdout.write(f"\r\033[K[{current}/{total}] RUNNING  {label}{combo}...")
+            sys.stdout.flush()
+
     def progress(result: TurnResult, done: int, total: int) -> None:
         if args.quiet:
             return
@@ -236,9 +245,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         detail = result.cause or ""
         if result.verdict is not Verdict.PASS:
             detail = f"{detail}: {result.reason}" if detail else result.reason
-        print(f"[{done}/{total}] {mark}  {label}{combo}  {detail[:90]}")
+        if sys.stdout.isatty():
+            sys.stdout.write(f"\r\033[K[{done}/{total}] {mark:4s}  {label}{combo}  {detail[:90]}\n")
+            sys.stdout.flush()
+        else:
+            print(f"[{done}/{total}] {mark:4s}  {label}{combo}  {detail[:90]}")
 
-    run = asyncio.run(run_project(project, cases=cases, name=args.name, progress=progress))
+    run = asyncio.run(
+        run_project(project, cases=cases, name=args.name, progress=progress, on_start=on_start)
+    )
     rollup = build_rollup(run)
     print()
     print(format_summary(rollup))

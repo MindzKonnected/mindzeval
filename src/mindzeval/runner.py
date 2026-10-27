@@ -45,6 +45,7 @@ from mindzeval.scoring.safety import score_safety
 from mindzeval.validate import ValidationReport, validate_cases
 
 Progress = Callable[[TurnResult, int, int], None]
+OnStart = Callable[[str, int, int, int], None]
 
 
 @dataclass
@@ -89,6 +90,7 @@ async def run_project(
     adapter: Adapter | None = None,
     database: Database | None = None,
     progress: Progress | None = None,
+    on_start: OnStart | None = None,
 ) -> RunResult:
     config = project.config
     selected = list(cases if cases is not None else project.cases)
@@ -120,8 +122,17 @@ async def run_project(
         )
         total = sum(len(c.turns) for c in selected) * len(combos)
         done = 0
+        started_count = 0
         results: list[TurnResult] = []
         lock = asyncio.Lock()
+
+        async def report_start(case_id: str, turn: int) -> None:
+            nonlocal started_count
+            async with lock:
+                started_count += 1
+                curr = started_count
+                if on_start is not None:
+                    on_start(case_id, turn, curr, total)
 
         async def report(result: TurnResult) -> None:
             nonlocal done
@@ -152,6 +163,7 @@ async def run_project(
                     validation=validation,
                     scorers=scorers,
                     report=report,
+                    report_start=report_start,
                 )
 
         await asyncio.gather(
@@ -197,6 +209,7 @@ async def _run_case(
     validation: ValidationReport | None,
     scorers: list[tuple[str, Scorer]],
     report: Callable[[TurnResult], Any],
+    report_start: Callable[[str, int], Any] | None = None,
 ) -> None:
     history: list[Message] = []
     for index, turn in enumerate(case.turns):
@@ -234,6 +247,9 @@ async def _run_case(
             decide(result, expects_execution=False)
             await report(result)
             return
+
+        if report_start is not None:
+            await report_start(case.id, index)
 
         request = AgentRequest(
             question=turn.question,

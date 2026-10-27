@@ -998,7 +998,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
             <div class="turn-header-left">
               <span class="badge badge-verdict badge-{v_class}">{r.verdict}</span>
               <span class="turn-id">{esc(r.case_id)}<span class="turn-num">#{r.turn}</span></span>
-              <span class="turn-q">{esc(r.question)}</span>
+              <span class="turn-q" title="{esc(r.question)}">{esc(r.question)}</span>
             </div>
             <div class="turn-header-right">
               {combo_badge}
@@ -1014,6 +1014,18 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
             <div class="verdict-banner banner-{v_class}">
               <div class="verdict-title">{cause_html} <span>{reason_text}</span></div>
               {rescue_note}
+            </div>
+
+            <!-- Full User Question / Prompt -->
+            <div class="prompt-box" data-prompt="{esc(r.question)}">
+              <div class="prompt-header">
+                <div class="prompt-title-wrap">
+                  <span class="prompt-icon">💬</span>
+                  <strong>User Question:</strong>
+                </div>
+                <button type="button" class="btn-sm-action" onclick="copyPromptText(this)">Copy Question</button>
+              </div>
+              <div class="prompt-text">{esc(r.question)}</div>
             </div>
 
             <!-- Evaluated Queries Side-by-Side -->
@@ -1554,6 +1566,45 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     .diff-missing { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
     .diff-spurious { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
     .diff-more { background: var(--bg-surface-elevated); color: var(--text-dim); border: 1px solid var(--border); font-size: .7rem; }
+
+    /* Prompt / Question Box */
+    .prompt-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent, #6366f1);
+      border-radius: 8px;
+      padding: .85rem 1rem;
+      margin-bottom: 1.25rem;
+      font-size: .88rem;
+    }
+    .prompt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: .45rem;
+    }
+    .prompt-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      color: var(--text-dim);
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .prompt-icon {
+      font-size: .95rem;
+    }
+    .prompt-text {
+      color: var(--text);
+      font-size: .92rem;
+      font-weight: 500;
+      line-height: 1.55;
+      word-break: break-word;
+      user-select: text;
+    }
 
     /* Answer Box */
     .answer-box {
@@ -2429,6 +2480,13 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       const codeEl = card ? card.querySelector('.query-code code') : null;
       if (!codeEl) return;
       copyText(btn, codeEl.innerText || codeEl.textContent);
+    }
+
+    function copyPromptText(btn) {
+      const box = btn.closest('.prompt-box');
+      if (!box) return;
+      const text = box.getAttribute('data-prompt') || box.querySelector('.prompt-text')?.textContent || '';
+      copyText(btn, text);
     }
 
     function toggleAnswerBox(btn) {
