@@ -271,3 +271,26 @@ def test_mixed_reference_sql_and_static_suite(write: Write, tmp_path: Path, shop
     html_content = written["html"].read_text(encoding="utf-8")
     assert "Reference Query (Golden Answer)" in html_content
     assert "Expected Result (Static Reference)" in html_content
+
+
+def test_render_markdown_table_and_formatting() -> None:
+    from mindzeval.report import _render_markdown
+
+    md = (
+        "Here are the first **50** of **220** fintech companies:\n\n"
+        "| Company | Description | Country |\n"
+        "| :--- | :---: | ---: |\n"
+        "| 101 Ventures | Venture builder | España |\n"
+        "| 11Onze | Fintech app | España |\n\n"
+        "- First note\n"
+        "- Second note\n"
+    )
+    rendered = _render_markdown(md)
+    assert '<table class="md-table">' in rendered
+    assert "<strong>50</strong>" in rendered
+    assert '<th style="text-align:left;">Company</th>' in rendered
+    assert '<th style="text-align:center;">Description</th>' in rendered
+    assert '<th style="text-align:right;">Country</th>' in rendered
+    assert '<td style="text-align:left;">101 Ventures</td>' in rendered
+    assert '<td style="text-align:right;">España</td>' in rendered
+    assert '<ul class="md-list"><li>First note</li><li>Second note</li></ul>' in rendered

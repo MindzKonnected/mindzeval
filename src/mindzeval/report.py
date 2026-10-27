@@ -631,7 +631,10 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     )
 
     total_tokens = (c.get("input_tokens") or 0) + (c.get("output_tokens") or 0)
-    cost_val = c.get("cost_usd") or 0.0
+    cost_val = c.get("cost_usd")
+    cost_sub = f" &middot; ${cost_val:.4f}" if cost_val is not None and cost_val > 0 else ""
+    tokens_sub = f" &middot; {total_tokens:,} tok" if total_tokens else ""
+    p95_sub = f"{c['p95_latency_ms'] or 0}ms" if c.get("p95_latency_ms") is not None else "0ms"
 
     kpi_cards = f"""
     <div class="kpi-grid">
@@ -664,9 +667,9 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         <div class="kpi-sub">P: {_pct(h["precision"])} &middot; R: {_pct(h["recall"])}</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Latency & Cost</div>
+        <div class="kpi-label">Latency &amp; Resources <button type="button" class="metric-info-btn" onclick="openMetricsModal(event, 'latency')" title="What are Latency & Tokens and how are they measured?">i</button></div>
         <div class="kpi-val">{c["mean_latency_ms"] or 0}<span class="kpi-unit">ms</span></div>
-        <div class="kpi-sub">p95: {c["p95_latency_ms"] or 0}ms &middot; {total_tokens} tok &middot; ${cost_val:.4f}</div>
+        <div class="kpi-sub">p95: {p95_sub}{tokens_sub}{cost_sub}</div>
       </div>
     </div>
     """
@@ -2226,6 +2229,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
 
     let currentPage = 1;
     let pageSize = 25;
+    let totalPages = 1;
     let currentFilteredCards = [];
 
     function initPagination() {
@@ -2273,10 +2277,14 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
 
     function goToPage(page) {
       const total = currentFilteredCards.length;
-      const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
-      if (page < 1) page = 1;
-      if (page > totalPages) page = totalPages;
-      currentPage = page;
+      totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
+      if (page === 'last') page = totalPages;
+      if (page === 'first') page = 1;
+      let target = (typeof page === 'number') ? page : parseInt(page, 10);
+      if (isNaN(target)) target = 1;
+      if (target < 1) target = 1;
+      if (target > totalPages) target = totalPages;
+      currentPage = target;
       renderPagination(true);
     }
 
@@ -2301,7 +2309,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       }
       if (paginationBar) paginationBar.style.display = 'flex';
 
-      const totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
+      totalPages = pageSize === -1 ? 1 : Math.max(1, Math.ceil(total / pageSize));
       if (currentPage > totalPages) currentPage = totalPages;
 
       let startIdx = 0;
@@ -2540,7 +2548,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
       document.querySelectorAll('.modal-tab').forEach(t => {
         t.classList.toggle('active', t.dataset.tab === tabName);
       });
-      const sections = ['summary', 'accuracy', 'precision', 'recall', 'f1'];
+      const sections = ['summary', 'accuracy', 'precision', 'recall', 'f1', 'latency'];
       sections.forEach(sec => {
         const el = document.getElementById('section-' + sec);
         if (!el) return;
@@ -2588,6 +2596,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         <button type="button" class="modal-tab" data-tab="precision" onclick="switchMetricsTab('precision')">✨ Precision</button>
         <button type="button" class="modal-tab" data-tab="recall" onclick="switchMetricsTab('recall')">🔍 Recall</button>
         <button type="button" class="modal-tab" data-tab="f1" onclick="switchMetricsTab('f1')">⚖️ F1 Score</button>
+        <button type="button" class="modal-tab" data-tab="latency" onclick="switchMetricsTab('latency')">⚡ Latency &amp; Tokens</button>
       </div>
 
       <div class="modal-body">
@@ -2627,6 +2636,12 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
                   <td>Is the answer both complete AND clean?</td>
                   <td>Perfect balance: found all answers with zero extra clutter.</td>
                   <td>Drops whenever rows are missing OR extra unwanted rows appear.</td>
+                </tr>
+                <tr>
+                  <td><strong>Latency &amp; Tokens</strong></td>
+                  <td>How fast was the answer and how much compute did it take?</td>
+                  <td>Fast sub-second response (&lt;1,000ms) with concise, efficient token usage.</td>
+                  <td>Slow database queries, multi-step reflection loops, or dumping massive unused schemas into prompts.</td>
                 </tr>
               </tbody>
             </table>
@@ -2769,6 +2784,45 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
             </div>
           </div>
         </div>
+
+        <!-- LATENCY & TOKENS SECTION -->
+        <div class="modal-section" id="section-latency">
+          <div class="metric-explainer-card">
+            <div class="explainer-head">
+              <span class="explainer-icon">⚡</span>
+              <div>
+                <h3 class="explainer-title">Latency, Tokens &amp; Compute Efficiency</h3>
+                <span class="explainer-tagline">"How fast did the agent respond, and how much LLM compute did it consume?"</span>
+              </div>
+            </div>
+            <div class="explainer-body">
+              <p>
+                <strong>Why track Tokens &amp; Latency instead of dollar costs?</strong><br>
+                Model API prices drop and fluctuate across providers, while self-hosted models (like Llama 3 or DeepSeek) have zero per-token API fees.
+                <strong>Tokens and Latency are physical, invariant units</strong> that remain constant over time, making them the industry benchmark for speed and cost-efficiency.
+              </p>
+              <ul>
+                <li><strong>Mean &amp; p95 Latency (ms):</strong> Measures total wall-clock time from question to SQL execution. <em>p95 Latency</em> captures worst-case outliers (such as timeout hangs, complex multi-table joins, or retry loops).</li>
+                <li><strong>Input Tokens (Prompt):</strong> Context sent to the model—system prompts, database schemas, foreign keys, few-shot examples, and user questions.</li>
+                <li><strong>Output Tokens (Completion):</strong> What the model generates—chain-of-thought planning, generated SQL syntax, and user-facing answers.</li>
+                <li><strong>LLM Calls:</strong> The number of round-trips to the AI model per turn. A single-shot query takes 1 call; self-correcting or reflective agents may take 2&ndash;5 calls.</li>
+              </ul>
+              <div class="formula-box">
+                <span class="formula-label">Efficiency Benchmark Guidelines:</span>
+                <code>Conversational Speed: &lt; 1,500ms &middot; High Efficiency: pruned table schema (&lt; 2,000 tokens) &middot; Single-turn SQL: 1 LLM call</code>
+              </div>
+              <div class="example-box">
+                <div class="example-title">💡 How to Optimize Latency &amp; Tokens:</div>
+                <p>
+                  <strong>Schema Pruning:</strong> If your database has 100 tables, dumping all table definitions can consume 20,000+ input tokens per question and add seconds of delay. Passing only relevant tables dramatically cuts latency and token costs.
+                </p>
+                <p>
+                  <strong>Avoiding Retry Loops:</strong> An agent that generates invalid SQL may loop 3 times asking the LLM to fix syntax errors, tripling both latency and token usage.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -2896,7 +2950,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         <button type="button" class="btn-page" id="btn-page-prev" onclick="goToPage(currentPage - 1)" title="Previous Page">&lsaquo;</button>
         <div class="pagination-numbers" id="pagination-numbers"></div>
         <button type="button" class="btn-page" id="btn-page-next" onclick="goToPage(currentPage + 1)" title="Next Page">&rsaquo;</button>
-        <button type="button" class="btn-page" id="btn-page-last" onclick="goToPage(totalPages)" title="Last Page">&raquo;</button>
+        <button type="button" class="btn-page" id="btn-page-last" onclick="goToPage('last')" title="Last Page">&raquo;</button>
       </div>
       <div class="pagination-size">
         <label for="page-size-select">Per page:</label>
