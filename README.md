@@ -2,7 +2,7 @@
 
 MindzEval proves your SQL agent is accurate and safe before it reaches users, and keeps proving it on every change.
 
-> **Status: internal alpha (`0.1.0.dev0`).** Interfaces may change before `0.1.0`. Internal testers: start with [docs/alpha-testing.md](docs/alpha-testing.md).
+> **Status: early release (`0.1.0.dev0`).** Interfaces may change before `0.1.0`. New here? Start with [getting started](docs/getting-started.md). Feedback and bug reports are welcome in the [issues](https://github.com/MindzKonnected/mindzeval/issues).
 
 ## What it does
 
@@ -17,12 +17,19 @@ MindzEval proves your SQL agent is accurate and safe before it reaches users, an
 
 ## Quickstart
 
+MindzEval needs Python 3.11 or newer. It isn't on PyPI yet, so install it from GitHub (`pip install mindzeval` will work once it is published):
+
 ```bash
-pip install "mindzeval[postgres] @ git+https://github.com/MindzKonnected/mindzeval.git@development"
+git clone https://github.com/MindzKonnected/mindzeval.git
+cd mindzeval
+python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
+pip install ".[postgres]"                            # leave out [postgres] if you only use SQLite
 mindzeval quickstart demo
 cd demo
 mindzeval run
 ```
+
+To install without cloning: `pip install "mindzeval[postgres] @ git+https://github.com/MindzKonnected/mindzeval.git@main"`.
 
 The example agent fails some cases on purpose so you can see what each verdict means.
 
@@ -61,6 +68,8 @@ mindzeval run        # evaluate; exits 1 if thresholds aren't met
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md): install, try the example, connect your agent
+- [Integration examples](https://github.com/MindzKonnected/mindzeval-integration-examples): runnable examples per framework, starting with LangGraph
 - [Connecting your agent](docs/guides/connecting-agents.md): Python, LangGraph, LangChain, CrewAI, HTTP, saved outputs, model comparison
 - [Case format](docs/reference/case-format.md)
 - [Config file](docs/reference/config.md)
@@ -78,4 +87,4 @@ pytest              # set MINDZEVAL_TEST_POSTGRES_URL to include Postgres
 ruff check src tests && ruff format --check src tests && mypy
 ```
 
-Work happens on `development` through pull requests. `production` holds released versions.
+Work happens on `development` through pull requests. `main` is the default branch and `production` holds released versions.
