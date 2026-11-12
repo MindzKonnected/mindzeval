@@ -7,12 +7,15 @@ name = "mindzeval"
 dynamic = ["version"]
 description = "Evaluation framework for SQL agents: result-based accuracy, behaviour scoring, multi-turn and golden-answer validation."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "MindzKonnected" }]
 keywords = ["llm", "evaluation", "text-to-sql", "sql", "agents", "testing"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -51,7 +54,10 @@ mindzeval = "mindzeval.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/MindzKonnected/mindzeval"
+Documentation = "https://github.com/MindzKonnected/mindzeval#readme"
+Repository = "https://github.com/MindzKonnected/mindzeval"
 Issues = "https://github.com/MindzKonnected/mindzeval/issues"
+Changelog = "https://github.com/MindzKonnected/mindzeval/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/mindzeval/_version.py"

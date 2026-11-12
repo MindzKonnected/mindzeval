@@ -4,7 +4,7 @@ All notable changes to MindzEval are recorded here. The project follows
 [semantic versioning](https://semver.org/); until `1.0` the public interfaces may change
 between minor versions.
 
-## Unreleased
+## [0.1.0] - 2026-11-12
 
 ### Added
 - **Contracts:** agent result record, case format (single- and multi-turn, six comparison
