@@ -1,7 +1,7 @@
 ---
-name: Alpha feedback
-about: Report what happened when you ran MindzEval on your agent
-labels: alpha-feedback
+name: Feedback
+about: Tell us what happened when you ran MindzEval on your agent
+labels: feedback
 ---
 
 **Agent:** framework (LangGraph, CrewAI, HTTP service, ...) and adapter used (python / http / outputs)

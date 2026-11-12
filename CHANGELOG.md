@@ -4,7 +4,7 @@ All notable changes to MindzEval are recorded here. The project follows
 [semantic versioning](https://semver.org/); until `1.0` the public interfaces may change
 between minor versions.
 
-## Unreleased (internal alpha)
+## Unreleased
 
 ### Added
 - **Contracts:** agent result record, case format (single- and multi-turn, six comparison
@@ -30,4 +30,10 @@ between minor versions.
   thresholds and exit codes.
 - `mindzeval quickstart`: a runnable example project.
 - Docs: connecting agents, case format, config, result record, reading results, custom
-  scorers, alpha-testing guide.
+  scorers, getting-started guide.
+
+### Changed
+- Prepared the repository for public use: the internal alpha guide is now
+  `docs/getting-started.md`, the alpha feedback issue template is now a general feedback
+  template, install instructions use the default branch, and CI also runs on `main`.
+- Documented the `truncated` field of the agent result record.

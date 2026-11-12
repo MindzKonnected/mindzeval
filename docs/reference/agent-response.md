@@ -11,6 +11,7 @@ For each turn, the agent returns a result record. MindzEval scores what it is gi
 | `params` | object or list | Bind parameters for `sql`, in the driver's own style (`%(name)s`, `?`, `:name`) |
 | `rows` | list of objects, or list of lists with `columns` | Result comparison. If absent, MindzEval re-runs `sql` to get them |
 | `columns` | list of strings | Column order. Required when `rows` are lists; inferred otherwise |
+| `truncated` | boolean | Set `true` when `rows` are only part of the result, for example when you cap rows in code instead of in the SQL. Without it, MindzEval infers truncation only from a trailing `LIMIT n` in `sql` |
 | `status` | `answer` \| `clarify` \| `decline` | Behaviour scoring. Skipped (and reported as skipped) when absent |
 | `reason` | string | Why the agent asked or declined, in the agent's own vocabulary |
 | `tool_calls` | list of `{name, arguments, output, error}` | Tool-use reporting |
