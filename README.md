@@ -2,7 +2,7 @@
 
 MindzEval proves your SQL agent is accurate and safe before it reaches users, and keeps proving it on every change.
 
-> **Status: early release (`0.1.0.dev0`).** Interfaces may change before `0.1.0`. New here? Start with [getting started](docs/getting-started.md). Feedback and bug reports are welcome in the [issues](https://github.com/MindzKonnected/mindzeval/issues).
+> **Status: release `0.1.0`.** New here? Start with [getting started](docs/getting-started.md). Feedback and bug reports are welcome in the [issues](https://github.com/MindzKonnected/mindzeval/issues).
 
 ## What it does
 
@@ -15,21 +15,25 @@ MindzEval proves your SQL agent is accurate and safe before it reaches users, an
 - **Compares models and prompts.** Matrix runs evaluate every combination side by side.
 - **Read-only by design.** Every query MindzEval runs is parsed and refused unless it is a single read, then executed in a read-only transaction with a timeout.
 
-## Quickstart
+## Installation
 
-MindzEval needs Python 3.11 or newer. It isn't on PyPI yet, so install it from GitHub (`pip install mindzeval` will work once it is published):
+MindzEval requires Python 3.11 or newer:
 
 ```bash
-git clone https://github.com/MindzKonnected/mindzeval.git
-cd mindzeval
-python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
-pip install ".[postgres]"                            # leave out [postgres] if you only use SQLite
+# SQLite only
+pip install mindzeval
+
+# With PostgreSQL support
+pip install "mindzeval[postgres]"
+```
+
+## Quickstart
+
+```bash
 mindzeval quickstart demo
 cd demo
 mindzeval run
 ```
-
-To install without cloning: `pip install "mindzeval[postgres] @ git+https://github.com/MindzKonnected/mindzeval.git@main"`.
 
 The example agent fails some cases on purpose so you can see what each verdict means.
 
@@ -88,3 +92,7 @@ ruff check src tests && ruff format --check src tests && mypy
 ```
 
 Work happens on `development` through pull requests. `main` is the default branch and `production` holds released versions.
+
+## License
+
+MindzEval is licensed under the [Apache License 2.0](LICENSE).
