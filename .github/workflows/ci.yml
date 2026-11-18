@@ -70,4 +70,4 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,postgres]"
-      - run: pytest tests/test_db.py -v
+      - run: pytest -v

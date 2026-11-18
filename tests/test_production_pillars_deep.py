@@ -16,7 +16,12 @@ from mindzeval import Database, Verdict, load_project, run
 from mindzeval.errors import QueryTimeoutError, SQLGuardError
 from mindzeval.sql.guard import check_read_only
 
-POSTGRES_URL = os.environ.get("MINDZEVAL_TEST_POSTGRES_URL", "postgresql://localhost/postgres")
+POSTGRES_URL = os.environ.get("MINDZEVAL_TEST_POSTGRES_URL")
+
+requires_postgres = pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="set MINDZEVAL_TEST_POSTGRES_URL to run live PostgreSQL tests",
+)
 
 
 # ==============================================================================
@@ -79,10 +84,12 @@ def test_security_dangerous_functions_blocked(dangerous_func: str) -> None:
     assert exc_info.value.kind == "function"
 
 
+@requires_postgres
 def test_security_postgres_engine_permission_boundary() -> None:
     """Even if an attacker bypassed the SQL parser with raw driver execution,
     PostgreSQL's read-only transaction mode MUST block writes at the database kernel level.
     """
+    assert POSTGRES_URL is not None
     with Database(POSTGRES_URL) as db:
         raw = db.engine.raw_connection()
         try:
@@ -102,11 +109,82 @@ def test_security_postgres_engine_permission_boundary() -> None:
 # ==============================================================================
 
 
+def test_concurrency_parallel_evaluation_on_sqlite(tmp_path: Path) -> None:
+    """Execute 16 test cases concurrently with concurrency: 8 against SQLite.
+    Verifies that connection pool handles simultaneous checkout/checkin,
+    statement timeouts isolate independently, and zero deadlocks occur.
+    """
+    import sqlite3
+
+    db_path = tmp_path / "concurrent.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE concurrent_test_items (id INT PRIMARY KEY, score INT);")
+    conn.executemany(
+        "INSERT INTO concurrent_test_items VALUES (?, ?);",
+        [(i, i * 10) for i in range(1, 101)],
+    )
+    conn.commit()
+    conn.close()
+
+    case_entries = []
+    for i in range(1, 17):
+        case_entries.append(
+            f"""
+- id: case_{i}
+  question: Query {i}
+  reference_sql: SELECT id, score FROM concurrent_test_items WHERE id = {i}
+  key: id
+"""
+        )
+    (tmp_path / "cases.yaml").write_text("\n".join(case_entries))
+
+    cfg_file = tmp_path / "mindzeval.yaml"
+    cfg_file.write_text(
+        f"""
+project: concurrency-sqlite
+agent:
+  type: python
+  target: concurrent_agent:answer
+  concurrency: 8
+database:
+  url: sqlite:///{db_path.name}
+  statement_timeout_s: 5.0
+datasets:
+  - cases.yaml
+"""
+    )
+
+    agent_code = """
+import re
+
+def answer(question, history):
+    m = re.search(r'\\d+', question)
+    case_num = int(m.group(0)) if m else 1
+    return {
+        "answer": f"Record {case_num}",
+        "sql": f"SELECT id, score FROM concurrent_test_items WHERE id = {case_num}",
+        "status": "answer",
+    }
+"""
+    (tmp_path / "concurrent_agent.py").write_text(agent_code)
+
+    project = load_project(cfg_file)
+    started = time.perf_counter()
+    res = run(project)
+    elapsed = time.perf_counter() - started
+
+    assert len(res.results) == 16
+    assert all(r.verdict is Verdict.PASS for r in res.results)
+    assert elapsed < 10.0
+
+
+@requires_postgres
 def test_concurrency_parallel_evaluation_on_postgres(tmp_path: Path) -> None:
     """Execute 16 test cases concurrently with concurrency: 8 against PostgreSQL.
     Verifies that connection pool handles simultaneous checkout/checkin,
     statement timeouts isolate independently, and zero deadlocks occur.
     """
+    assert POSTGRES_URL is not None
     # 1. Setup sample schema in PostgreSQL
     with Database(POSTGRES_URL) as db:
         raw = db.engine.raw_connection()
@@ -184,6 +262,31 @@ def answer(question, history):
 # ==============================================================================
 
 
+def test_performance_bounded_memory_sqlite(tmp_path: Path) -> None:
+    """Verify memory bounding with max_rows truncation on SQLite table."""
+    import sqlite3
+
+    db_path = tmp_path / "perf.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE perf_orders (id INT PRIMARY KEY, amount NUMERIC);")
+    conn.executemany(
+        "INSERT INTO perf_orders VALUES (?, ?);",
+        [(i, (i * 13) % 1000 + 0.5) for i in range(1, 10001)],
+    )
+    conn.commit()
+    conn.close()
+
+    with Database(f"sqlite:///{db_path}", max_rows=50) as db:
+        started = time.perf_counter()
+        scan_result = db.fetch("SELECT id, amount FROM perf_orders ORDER BY id;")
+        scan_time = time.perf_counter() - started
+
+        assert scan_result.truncated is True
+        assert len(scan_result.rows) == 50
+        assert scan_time < 0.5
+
+
+@requires_postgres
 def test_performance_100k_rows_on_postgres_and_bounded_memory(tmp_path: Path) -> None:
     """Setup a 100,000-row table and a 10,000-row table in PostgreSQL.
     Verify:
@@ -192,6 +295,7 @@ def test_performance_100k_rows_on_postgres_and_bounded_memory(tmp_path: Path) ->
        and finishes sub-second without memory bloat.
     3. Statement timeouts accurately abort runaway queries.
     """
+    assert POSTGRES_URL is not None
     with Database(POSTGRES_URL) as db:
         raw = db.engine.raw_connection()
         try:
