@@ -114,3 +114,23 @@ def _count(path: Path) -> int:
         return int(conn.execute("SELECT count(*) FROM customers").fetchone()[0])
     finally:
         conn.close()
+
+
+def test_max_rows_truncates_large_results(tmp_path: Path) -> None:
+    path = tmp_path / "large.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE numbers (n INT);")
+    conn.executemany("INSERT INTO numbers VALUES (?);", [(i,) for i in range(25)])
+    conn.commit()
+    conn.close()
+
+    with Database(f"sqlite:///{path.as_posix()}", max_rows=10) as db:
+        res = db.fetch("SELECT n FROM numbers ORDER BY n")
+        assert len(res.rows) == 10
+        assert res.truncated is True
+        assert res.rows[0] == (0,)
+        assert res.rows[-1] == (9,)
+
+        res_small = db.fetch("SELECT n FROM numbers WHERE n < 5")
+        assert len(res_small.rows) == 5
+        assert res_small.truncated is False

@@ -127,6 +127,8 @@ class DatabaseConfig(_Strict):
     statement_timeout_s: float = Field(default=30.0, gt=0, le=3600)
     dialect: str | None = None
     """SQL dialect for parsing. Inferred from the URL when omitted."""
+    max_rows: int = Field(default=25_000, gt=0)
+    """Maximum rows fetched per query before stopping. Protects memory against huge table scans."""
 
 
 class ScoringConfig(_Strict):

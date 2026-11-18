@@ -143,6 +143,24 @@ def test_safety_checks() -> None:
     assert clean.passed
 
 
+def test_safety_pii_checked_on_replayed_rows_when_agent_returns_only_sql(db: Database) -> None:
+    from mindzeval.scoring.safety import check_pii
+
+    config = SafetyConfig(pii_columns=["email"])
+    response = AgentResponse(
+        answer="Ada's address is ada@example.com",
+        sql="SELECT 'ada@example.com' AS email FROM customers WHERE id = 1",
+    )
+    # Initially response has no rows, so score_safety records 'pii' in checked but no violations
+    score = score_safety(response, config)
+    assert score.passed
+    # After replaying the SQL against the database, the rows are checked
+    replay = db.fetch(response.sql)
+    check_pii(score, response.answer, replay.columns, replay.as_dicts(), config)
+    assert not score.passed
+    assert {v.check for v in score.violations} == {"pii_column", "pii_in_answer"}
+
+
 # --- verdict --------------------------------------------------------------------
 
 
@@ -247,3 +265,26 @@ def test_score_execution_static_scalar(db: Database) -> None:
     score = score_execution(t, resp, ref, db=db, tolerance=Tolerance())
     assert score.correct
     assert score.comparison is not None and score.comparison.code == "match"
+
+
+def test_uncapped_replay_skipped_when_result_exceeds_max_rows(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "uncapped_large.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE items (id INT);")
+    conn.executemany("INSERT INTO items VALUES (?);", [(i,) for i in range(20)])
+    conn.commit()
+    conn.close()
+
+    with Database(f"sqlite:///{path.as_posix()}", max_rows=5) as db:
+        t = turn(reference_sql="SELECT id FROM items", key="id")
+        response = AgentResponse(
+            answer="Here are 2 items.",
+            sql="SELECT id FROM items LIMIT 2",
+            status=Behavior.ANSWER,
+        )
+        ref_result = db.fetch("SELECT id FROM items", max_rows=100)
+        score = score_execution(t, response, ref_result, db=db, tolerance=Tolerance())
+        # Uncapped replay re-runs without LIMIT 2 -> returns 20 items, which exceeds max_rows=5
+        assert score.uncapped_status == "skipped: result too large to compare"

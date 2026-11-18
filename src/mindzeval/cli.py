@@ -171,6 +171,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         config.database.url.get_secret_value(),
         statement_timeout_s=config.database.statement_timeout_s,
         dialect=config.database.dialect,
+        max_rows=config.database.max_rows,
     ) as db:
         report = validate_cases(cases, db, config.validation)
 

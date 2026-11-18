@@ -2,7 +2,7 @@
 
 MindzEval proves your SQL agent is accurate and safe before it reaches users, and keeps proving it on every change.
 
-> **Status: release `0.1.0`.** New here? Start with [getting started](docs/getting-started.md). Feedback and bug reports are welcome in the [issues](https://github.com/MindzKonnected/mindzeval/issues).
+> **Status: release `0.1.1`.** New here? Start with [getting started](docs/getting-started.md). Feedback and bug reports are welcome in the [issues](https://github.com/MindzKonnected/mindzeval/issues).
 
 ## What it does
 

@@ -113,6 +113,13 @@ def validate_turn(
         if severity is not Severity.OFF:
             out.findings.append(Finding(check, severity, message))
 
+    if result.truncated:
+        add(
+            "row_limit",
+            Severity.WARN,
+            f"the reference query returned more than max_rows ({db.max_rows}); result was capped",
+        )
+
     scalar_value = result.rows[0][0] if result.rows and result.rows[0] else None
     is_empty = result.row_count == 0 or (
         turn.compare is CompareMode.SCALAR and scalar_value is None

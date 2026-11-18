@@ -4,6 +4,15 @@ All notable changes to MindzEval are recorded here. The project follows
 [semantic versioning](https://semver.org/); until `1.0` the public interfaces may change
 between minor versions.
 
+## [0.1.1] - 2026-11-18
+
+### Fixed
+- **Safety / PII detection for SQL-only agents:** The PII check now inspects replayed query results and answer text when the agent returns only `sql` without pre-computed rows (the minimal contract). Replayed rows from execution scoring are reused directly with zero redundant database queries.
+- **Resource limit and memory protection on replay (`max_rows`):** Added `database.max_rows` (default 25,000) to protect against memory exhaustion during uncapped query replay on large warehouse tables. The database layer reads bounded batches using `cursor.fetchmany(max_rows + 1)`. When a query exceeds the limit, uncapped replay is safely skipped and reported as `skipped: result too large to compare`, preventing out-of-memory crashes.
+- **Scalar comparison single-row validation:** `_scalar_of` now strictly requires exactly one row (`len(table.rows) == 1`). Multi-row results (e.g. lists returned for count questions) are correctly flagged with failure code `no_single_value` rather than passing coincidentally when row 0 matches. Broken reference queries returning multiple rows are flagged as `reference_no_single_value` and blocked.
+- **Release workflow quality gate:** Added a mandatory `check` prerequisite job to `.github/workflows/release.yml` that runs linting, formatting, strict type checking, full pytest execution, and tag-versus-version verification before uploading to PyPI.
+- **Reporting clarity:** The HTML and text reports now clearly distinguish between an uncapped match, an uncapped mismatch, and an uncapped comparison skipped due to resource limits (`SKIPPED (RESOURCE LIMIT)`).
+
 ## [0.1.0] - 2026-11-12
 
 ### Added

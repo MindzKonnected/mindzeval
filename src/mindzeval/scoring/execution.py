@@ -49,6 +49,12 @@ class ExecutionScore:
     uncapped_status: str = ""
     """``compared``, ``skipped: <why>`` or ``error: <what>`` (an evaluator-side issue)."""
 
+    replayed_columns: tuple[str, ...] | None = None
+    """Columns returned when MindzEval replayed the agent's SQL."""
+
+    replayed_rows: list[dict[str, Any]] | None = None
+    """Rows as dicts when MindzEval replayed the agent's SQL."""
+
     @property
     def scored(self) -> bool:
         return self.comparison is not None
@@ -102,6 +108,10 @@ def score_execution(
         else:
             agent_table = Table(replay.columns, replay.rows)
             score.rows_source = "replayed"
+            score.replayed_columns = replay.columns
+            score.replayed_rows = replay.as_dicts()
+            if replay.truncated:
+                score.truncated = True
     if agent_table is None:
         return score
 
@@ -152,11 +162,14 @@ def score_execution(
         except (SQLGuardError, DatabaseError) as exc:
             score.uncapped_status = f"error: {exc}"
         else:
-            if is_static_count:
+            if full.truncated:
+                score.uncapped_status = "skipped: result too large to compare"
+            elif is_static_count:
                 assert isinstance(turn.expected_rows, int)
                 score.uncapped = _compare_static_row_count(
                     mode, turn.expected_rows, Table(full.columns, full.rows), turn.key
                 )
+                score.uncapped_status = "compared"
             else:
                 score.uncapped = compare(
                     mode,
@@ -165,7 +178,7 @@ def score_execution(
                     key=turn.key,
                     tolerance=tolerance,
                 )
-            score.uncapped_status = "compared"
+                score.uncapped_status = "compared"
     return score
 
 

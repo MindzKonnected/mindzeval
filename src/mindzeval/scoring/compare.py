@@ -206,8 +206,8 @@ def _describe_difference(result: Comparison) -> None:
 
 
 def _scalar_of(table: Table, prefer: str | None) -> tuple[bool, Any]:
-    """The single value of a result, if it has one."""
-    if not table.rows:
+    """The single value of a result, if it has exactly one row."""
+    if len(table.rows) != 1:
         return False, None
     row = table.rows[0]
     if len(row) == 1:
@@ -226,6 +226,14 @@ def _compare_scalar(reference: Table, agent: Table, tolerance: Tolerance) -> Com
     result = Comparison(mode=CompareMode.SCALAR)
     found_ref, ref_value = _scalar_of(reference, None)
     result.reference_n = 1 if found_ref else 0
+    if not found_ref:
+        result.code = "reference_no_single_value"
+        result.reason = (
+            "the reference query has no single value to compare "
+            f"({len(reference.rows)} rows, columns: {', '.join(reference.columns) or 'none'})"
+        )
+        return result
+
     found, value = _scalar_of(agent, reference.columns[0] if reference.columns else None)
     result.agent_n = 1 if found else 0
     if not found:

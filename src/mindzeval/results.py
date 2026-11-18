@@ -209,17 +209,26 @@ def _execution_outcome(result: TurnResult, execution: ExecutionScore) -> tuple[s
 
     comparison = execution.comparison
     if comparison.correct:
-        return None, comparison.reason
+        reason = comparison.reason
+        if execution.uncapped_status and execution.uncapped_status.startswith(
+            "skipped: result too large to compare"
+        ):
+            reason += " | uncapped: skipped (result exceeds database.max_rows resource limit)"
+        return None, reason
     if execution.truncated_subset:
         reason = f"truncated at {comparison.agent_n} of {comparison.reference_n}; every row shown is correct"
         if execution.uncapped is not None:
             reason += " | uncapped: " + (
                 "exact match" if execution.uncapped.correct else execution.uncapped.reason
             )
+        elif execution.uncapped_status:
+            reason += f" | uncapped: {execution.uncapped_status}"
         return "truncated", reason
     reason = comparison.reason
     if execution.uncapped is not None:
         reason += " | uncapped: " + (
             "exact match" if execution.uncapped.correct else execution.uncapped.reason
         )
+    elif execution.uncapped_status and execution.uncapped_status.startswith("skipped"):
+        reason += f" | uncapped: {execution.uncapped_status}"
     return comparison.code if comparison.code in CAUSES else "wrong_rows", reason

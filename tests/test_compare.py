@@ -108,6 +108,25 @@ def test_scalar_without_single_value() -> None:
     assert c.code == "no_single_value"
 
 
+def test_scalar_multi_row_agent_fails_even_if_first_value_matches() -> None:
+    # An agent returning multiple rows when a scalar is expected must fail,
+    # even if the first row coincidentally matches the reference value.
+    rows = [{"n": 1}, {"n": 2}, {"n": 3}, {"n": 4}, {"n": 5}]
+    c = compare(CompareMode.SCALAR, ref(("n",), (1,)), agent(rows), key=None, tolerance=T)
+    assert not c.correct
+    assert c.code == "no_single_value"
+    assert "5 rows" in c.reason
+
+
+def test_scalar_multi_row_reference_reports_reference_error() -> None:
+    # If the reference itself has multiple rows in scalar mode, flag reference error.
+    reference_table = Table(("n",), [(1,), (2,)])
+    c = compare(CompareMode.SCALAR, reference_table, agent([{"n": 1}]), key=None, tolerance=T)
+    assert not c.correct
+    assert c.code == "reference_no_single_value"
+    assert "2 rows" in c.reason
+
+
 # --- grouped ----------------------------------------------------------------
 
 

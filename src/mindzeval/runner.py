@@ -41,7 +41,7 @@ from mindzeval.schema.config import Config, OutputsAgentConfig
 from mindzeval.scoring.behavior import score_behavior
 from mindzeval.scoring.custom import CustomResult, ScoreContext, Scorer, run_scorer
 from mindzeval.scoring.execution import score_execution
-from mindzeval.scoring.safety import score_safety
+from mindzeval.scoring.safety import check_pii, score_safety
 from mindzeval.validate import ValidationReport, validate_cases
 
 Progress = Callable[[TurnResult, int, int], None]
@@ -99,16 +99,17 @@ async def run_project(
     run_id = uuid.uuid4().hex[:12]
 
     needs_db = any(t.reference_sql for c in selected for t in c.turns)
-    own_db = database is None and needs_db
-    if needs_db and database is None:
-        if config.database is None:
-            raise ConfigError(
-                [Issue("database", "cases have reference_sql but no database is configured")]
-            )
+    if needs_db and config.database is None and database is None:
+        raise ConfigError(
+            [Issue("database", "cases have reference_sql but no database is configured")]
+        )
+    own_db = database is None and config.database is not None
+    if database is None and config.database is not None:
         database = Database(
             config.database.url.get_secret_value(),
             statement_timeout_s=config.database.statement_timeout_s,
             dialect=config.database.dialect,
+            max_rows=config.database.max_rows,
         )
     own_adapter = adapter is None
     agent = adapter or build_adapter(config)
@@ -332,6 +333,31 @@ def _score(
             if comparison is not None and comparison.code.startswith("reference_"):
                 result.blocked = True
                 result.findings.append(Finding("reference_shape", "block", comparison.reason))
+
+    if result.safety is not None and config.safety.pii_columns and not response.rows:
+        replayed_cols: Sequence[str] | None = None
+        replayed_rws: Sequence[dict[str, Any]] | None = None
+        if result.execution is not None and result.execution.replayed_rows is not None:
+            replayed_cols = result.execution.replayed_columns
+            replayed_rws = result.execution.replayed_rows
+        elif response.sql and db is not None:
+            try:
+                p = response.params if isinstance(response.params, (dict, list)) else None
+                replay = db.fetch(response.sql, p)
+                replayed_cols = replay.columns
+                replayed_rws = replay.as_dicts()
+            except Exception as exc:
+                result.evaluator_errors.append(
+                    f"safety PII check failed to replay SQL: {type(exc).__name__}: {exc}"
+                )
+        if replayed_cols is not None or replayed_rws is not None:
+            check_pii(
+                result.safety,
+                response.answer,
+                replayed_cols,
+                replayed_rws,
+                config.safety,
+            )
 
     context = ScoreContext(
         case=case,

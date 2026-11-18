@@ -826,6 +826,20 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
               </div>
             </div>
             """
+        elif (
+            e_score
+            and e_score.uncapped_status
+            and e_score.uncapped_status.startswith("skipped: result too large to compare")
+        ):
+            uncapped_block = """
+            <div class="uncapped-box" style="border-left: 3px solid #d97706;">
+              <div class="uncapped-header">
+                <strong>Uncapped Replay:</strong>
+                <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.3);">SKIPPED (RESOURCE LIMIT)</span>
+                <span class="muted">Exceeded database.max_rows. Evaluator halted fetch to protect memory; full query not evaluated.</span>
+              </div>
+            </div>
+            """
 
         # Data differences & metrics
         diff_html = ""

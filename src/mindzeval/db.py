@@ -43,6 +43,7 @@ class QueryResult:
     elapsed_ms: float = 0.0
     sql: str = field(default="", repr=False)
     _row_count: int | None = field(default=None, repr=False)
+    truncated: bool = False
 
     @property
     def row_count(self) -> int:
@@ -80,10 +81,12 @@ class Database:
         statement_timeout_s: float = 30.0,
         dialect: str | None = None,
         forbidden_functions: Iterable[str] = (),
+        max_rows: int | None = 25_000,
     ) -> None:
         if (url is None) == (engine is None):
             raise ValueError("pass exactly one of 'url' or 'engine'")
         self.statement_timeout_s = statement_timeout_s
+        self.max_rows = max_rows
         self._forbidden = tuple(forbidden_functions)
         self._engine = engine if engine is not None else _create_engine(str(url))
         backend = self._engine.dialect.name
@@ -106,6 +109,7 @@ class Database:
         params: Sequence[Any] | dict[str, Any] | None = None,
         *,
         timeout_s: float | None = None,
+        max_rows: int | None = None,
     ) -> QueryResult:
         """Run one read-only query and return its rows.
 
@@ -115,6 +119,7 @@ class Database:
         """
         check_read_only(sql, dialect=self.dialect, forbidden_functions=self._forbidden)
         timeout = timeout_s if timeout_s is not None else self.statement_timeout_s
+        limit = max_rows if max_rows is not None else self.max_rows
 
         try:
             raw = self._engine.raw_connection()
@@ -128,9 +133,11 @@ class Database:
                 if self.backend == "postgresql":
                     cursor.execute("SET TRANSACTION READ ONLY")
                     cursor.execute(f"SET LOCAL statement_timeout = {max(1, int(timeout * 1000))}")
-                    rows, columns = _run(cursor, sql, params)
+                    rows, columns, truncated = _run(cursor, sql, params, max_rows=limit)
                 else:
-                    rows, columns = _run_sqlite(raw.driver_connection, cursor, sql, params, timeout)
+                    rows, columns, truncated = _run_sqlite(
+                        raw.driver_connection, cursor, sql, params, timeout, max_rows=limit
+                    )
             finally:
                 cursor.close()
         except QueryTimeoutError:
@@ -151,7 +158,9 @@ class Database:
                 raw.close()
 
         elapsed = (time.perf_counter() - started) * 1000.0
-        return QueryResult(columns=columns, rows=rows, elapsed_ms=elapsed, sql=sql)
+        return QueryResult(
+            columns=columns, rows=rows, elapsed_ms=elapsed, sql=sql, truncated=truncated
+        )
 
     def close(self) -> None:
         self._engine.dispose()
@@ -213,8 +222,12 @@ def _create_engine(url: str) -> Engine:
 
 
 def _run(
-    cursor: Any, sql: str, params: Sequence[Any] | dict[str, Any] | None
-) -> tuple[list[tuple[Any, ...]], tuple[str, ...]]:
+    cursor: Any,
+    sql: str,
+    params: Sequence[Any] | dict[str, Any] | None,
+    *,
+    max_rows: int | None = None,
+) -> tuple[list[tuple[Any, ...]], tuple[str, ...], bool]:
     # Drivers only interpolate placeholders when params are passed. Passing an
     # empty container would make literal '%' characters (LIKE '%x') fail.
     if params:
@@ -223,8 +236,20 @@ def _run(
         cursor.execute(sql)
     description = cursor.description or ()
     columns = tuple(str(d[0]) for d in description)
-    rows = [tuple(r) for r in cursor.fetchall()] if description else []
-    return rows, columns
+    truncated = False
+    if description:
+        if max_rows is not None and max_rows > 0:
+            batch = cursor.fetchmany(max_rows + 1)
+            if len(batch) > max_rows:
+                truncated = True
+                rows = [tuple(r) for r in batch[:max_rows]]
+            else:
+                rows = [tuple(r) for r in batch]
+        else:
+            rows = [tuple(r) for r in cursor.fetchall()]
+    else:
+        rows = []
+    return rows, columns, truncated
 
 
 def _run_sqlite(
@@ -233,7 +258,9 @@ def _run_sqlite(
     sql: str,
     params: Sequence[Any] | dict[str, Any] | None,
     timeout: float,
-) -> tuple[list[tuple[Any, ...]], tuple[str, ...]]:
+    *,
+    max_rows: int | None = None,
+) -> tuple[list[tuple[Any, ...]], tuple[str, ...], bool]:
     deadline = time.monotonic() + timeout
     timed_out = False
 
@@ -247,7 +274,7 @@ def _run_sqlite(
     cursor.execute("PRAGMA query_only = ON")
     connection.set_progress_handler(check_deadline, 10_000)
     try:
-        return _run(cursor, sql, params)
+        return _run(cursor, sql, params, max_rows=max_rows)
     except sqlite3.OperationalError as exc:
         if timed_out:
             raise QueryTimeoutError(f"the query ran longer than {timeout:g}s") from exc
