@@ -48,29 +48,45 @@ def _load(path: Path) -> dict[tuple[str, int], Any]:
         raise ConfigError([Issue(source, f"cannot read outputs file: {exc}")]) from None
 
     items: list[tuple[int | None, Any]] = []
-    try:
-        if path.suffix.lower() == ".json":
+    issues: list[Issue] = []
+
+    if path.suffix.lower() == ".json":
+        try:
             loaded = json.loads(text)
-            if not isinstance(loaded, list):
-                raise ConfigError([Issue(source, "an outputs JSON file must contain a list")])
-            items = [(None, item) for item in loaded]
-        else:
-            items = [
-                (n, json.loads(line)) for n, line in enumerate(text.splitlines(), 1) if line.strip()
-            ]
-    except json.JSONDecodeError as exc:
-        raise ConfigError([Issue(source, f"invalid JSON: {exc.msg}", line=exc.lineno)]) from None
+        except json.JSONDecodeError as exc:
+            raise ConfigError(
+                [Issue(source, f"invalid JSON: {exc.msg}", line=exc.lineno)]
+            ) from None
+        if not isinstance(loaded, list):
+            raise ConfigError([Issue(source, "an outputs JSON file must contain a list")])
+        items = [(None, item) for item in loaded]
+    else:
+        for n, line_text in enumerate(text.splitlines(), 1):
+            stripped = line_text.strip()
+            if not stripped:
+                continue
+            try:
+                items.append((n, json.loads(stripped)))
+            except json.JSONDecodeError as exc:
+                issues.append(Issue(source, f"invalid JSON: {exc.msg}", line=n))
 
     records: dict[tuple[str, int], Any] = {}
-    issues: list[Issue] = []
-    for line, item in items:
+    for line_no, item in items:
         if not isinstance(item, dict) or "case_id" not in item:
-            issues.append(Issue(source, "each output needs a 'case_id'", line=line))
+            issues.append(Issue(source, "each output needs a 'case_id'", line=line_no))
             continue
-        key = (str(item["case_id"]), int(item.get("turn", 0)))
+        turn_val = item.get("turn", 0)
+        try:
+            turn_idx = int(turn_val)
+        except (TypeError, ValueError):
+            issues.append(
+                Issue(source, f"'turn' must be an integer, got {turn_val!r}", line=line_no)
+            )
+            continue
+        key = (str(item["case_id"]), turn_idx)
         if key in records:
             issues.append(
-                Issue(source, f"duplicate output for case '{key[0]}' turn {key[1]}", line=line)
+                Issue(source, f"duplicate output for case '{key[0]}' turn {key[1]}", line=line_no)
             )
             continue
         records[key] = item.get(

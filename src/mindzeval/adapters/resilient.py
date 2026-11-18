@@ -46,13 +46,22 @@ class ResilientAdapter(Adapter):
         while True:
             await self._wait_for_slot()
             self.attempts += 1
+            current_attempts = attempt + 1
             try:
                 if self._timeout:
-                    return await asyncio.wait_for(self.inner.call(request), self._timeout)
-                return await self.inner.call(request)
+                    response = await asyncio.wait_for(self.inner.call(request), self._timeout)
+                else:
+                    response = await self.inner.call(request)
+                response.metadata["_attempts"] = current_attempts
+                return response
             except TimeoutError:
-                error = AgentError(AgentErrorKind.TIMEOUT, f"no response within {self._timeout:g}s")
+                error = AgentError(
+                    AgentErrorKind.TIMEOUT,
+                    f"no response within {self._timeout:g}s",
+                    attempts=current_attempts,
+                )
             except AgentError as exc:
+                exc.attempts = current_attempts
                 error = exc
             if not error.retryable or attempt >= self._retries:
                 raise error

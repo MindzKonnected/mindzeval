@@ -160,6 +160,8 @@ def summarise(results: list[TurnResult]) -> dict[str, Any]:
             "input_tokens": sum(u.input_tokens or 0 for u in usage) or None,
             "output_tokens": sum(u.output_tokens or 0 for u in usage) or None,
             "cost_usd": round(sum(u.cost_usd or 0 for u in usage), 4) or None,
+            "retried_turns": sum(1 for r in results if r.attempts > 1),
+            "total_attempts": sum(r.attempts for r in results),
         },
         "evaluator": {
             "errors": evaluator_errors,
@@ -247,7 +249,7 @@ CSV_COLUMNS = [
     "uncapped_status", "uncapped_correct", "uncapped_precision", "uncapped_recall",
     "sql_error", "behavior_checks", "safety_violations", "custom_checks",
     "validation", "evaluator_errors", "error_kind",
-    "latency_ms", "input_tokens", "output_tokens", "cost_usd",
+    "attempts", "latency_ms", "input_tokens", "output_tokens", "cost_usd",
     "answer", "sql", "reference_sql",
 ]  # fmt: skip
 
@@ -328,6 +330,7 @@ def turn_row(r: TurnResult) -> dict[str, Any]:
         "validation": " ; ".join(f"{f.severity} {f.check}: {f.message}" for f in r.findings),
         "evaluator_errors": " ; ".join(r.evaluator_errors),
         "error_kind": r.error_kind or "",
+        "attempts": r.attempts,
         "latency_ms": round(r.latency_ms) if r.latency_ms else "",
         "input_tokens": blank(usage.input_tokens if usage else None),
         "output_tokens": blank(usage.output_tokens if usage else None),
@@ -781,6 +784,9 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
         lat_badge = (
             f'<span class="badge badge-lat">{round(r.latency_ms)}ms</span>' if r.latency_ms else ""
         )
+        attempt_badge = (
+            f'<span class="badge badge-retry">{r.attempts} tries</span>' if r.attempts > 1 else ""
+        )
         combo_badge = (
             f'<span class="badge badge-combo">{esc(r.combo_label)}</span>'
             if len(run.combos) > 1
@@ -1020,6 +1026,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
               {diff_badge}
               {mode_badge}
               {lat_badge}
+              {attempt_badge}
               {tag_pills}
               <span class="chevron">&#9662;</span>
             </div>
@@ -1445,6 +1452,7 @@ def render_html(run: RunResult, rollup: dict[str, Any]) -> str:
     .badge-cat { background: rgba(99,102,241,0.1); color: #818cf8; border: 1px solid rgba(99,102,241,0.25); }
     .badge-diff { background: var(--bg-surface-elevated); color: var(--text-muted); border: 1px solid var(--border); }
     .badge-lat { background: var(--bg-surface-elevated); color: var(--text-dim); border: 1px solid var(--border); }
+    .badge-retry { background: rgba(245,158,11,0.1); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
     .badge-tag { background: var(--bg-surface-elevated); color: var(--text-dim); border: 1px solid var(--border); text-transform: none; }
     .badge-combo { background: rgba(168,85,247,0.1); color: #c084fc; border: 1px solid rgba(168,85,247,0.25); text-transform: none; }
 

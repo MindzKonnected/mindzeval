@@ -22,16 +22,18 @@ The function may accept any of `question`, `history`, `session_id`, `case_id`, `
 
 ### LangGraph
 
+For a graph with conversation memory (checkpointer configured, e.g. `MemorySaver` or PostgreSQL checkpointer), pass only the new question for each turn. The graph uses `session_id` as its `thread_id` to retrieve earlier turns:
+
 ```python
 # my_project/eval_adapter.py
 from my_project.graph import build_graph
 
 graph = build_graph()  # build once, reuse across cases
 
-async def answer(question, history, session_id, params):
-    messages = [(m["role"], m["content"]) for m in history] + [("user", question)]
+async def answer(question, session_id, params):
+    # Stateful graph: thread_id maintains history; do not re-send history to avoid duplicated turns
     state = await graph.ainvoke(
-        {"messages": messages},
+        {"messages": [("user", question)]},
         config={"configurable": {"thread_id": session_id, "model": params.get("model")}},
     )
     return {
@@ -40,6 +42,22 @@ async def answer(question, history, session_id, params):
         "rows": state.get("rows"),          # optional: MindzEval re-runs the SQL if omitted
         "status": state.get("status", "answer"),
         "trace": {"plan": state.get("plan")},  # optional, for trace assertions
+    }
+```
+
+If your graph is stateless (no checkpointer), declare `history` and construct the full message list:
+
+```python
+async def answer_stateless(question, history, params):
+    messages = [(m["role"], m["content"]) for m in history] + [("user", question)]
+    state = await graph.ainvoke(
+        {"messages": messages},
+        config={"configurable": {"model": params.get("model")}},
+    )
+    return {
+        "answer": state["messages"][-1].content,
+        "sql": state.get("sql"),
+        "rows": state.get("rows"),
     }
 ```
 
@@ -55,10 +73,15 @@ agent = create_sql_agent(llm, db=db, agent_type="tool-calling", return_intermedi
 def answer(question):
     result = agent.invoke({"input": question})
     sql = None
-    for action, _observation in result["intermediate_steps"]:
-        if action.tool == "sql_db_query":
-            sql = action.tool_input["query"] if isinstance(action.tool_input, dict) else action.tool_input
-    return {"answer": result["output"], "sql": sql, "status": "answer"}
+    for action, _observation in result.get("intermediate_steps", []):
+        if getattr(action, "tool", None) == "sql_db_query":
+            tool_input = getattr(action, "tool_input", {})
+            sql = (
+                tool_input["query"]
+                if isinstance(tool_input, dict) and "query" in tool_input
+                else tool_input
+            )
+    return {"answer": result.get("output", ""), "sql": sql, "status": "answer"}
 ```
 
 ### CrewAI
@@ -68,8 +91,13 @@ from my_project.crew import build_crew
 
 def answer(question):
     output = build_crew().kickoff(inputs={"question": question})
-    data = output.json_dict or {}          # if your task uses output_json / output_pydantic
-    return {"answer": output.raw, "sql": data.get("sql"), "rows": data.get("rows")}
+    # If your task configured output_json or output_pydantic:
+    data = output.json_dict or (
+        output.pydantic.model_dump() if getattr(output, "pydantic", None) else {}
+    )
+    sql = data.get("sql") if isinstance(data, dict) else None
+    rows = data.get("rows") if isinstance(data, dict) else None
+    return {"answer": output.raw, "sql": sql, "rows": rows}
 ```
 
 ### Reporting clarifications and refusals

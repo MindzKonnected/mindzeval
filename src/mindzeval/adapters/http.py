@@ -80,14 +80,20 @@ class HttpAdapter(Adapter):
                 if response.status_code >= 500
                 else AgentErrorKind.INVALID_RESPONSE
             )
-            raise AgentError(kind, f"HTTP {response.status_code}: {response.text[:300]}")
+            reason = response.reason_phrase or "error"
+            if config.include_error_body:
+                msg = f"HTTP {response.status_code} ({reason}): {response.text[:300]}"
+            else:
+                msg = f"HTTP {response.status_code} ({reason})"
+            raise AgentError(kind, msg)
         try:
             payload = response.json()
         except (json.JSONDecodeError, ValueError):
-            raise AgentError(
-                AgentErrorKind.INVALID_RESPONSE,
-                f"the response is not JSON: {response.text[:200]!r}",
-            ) from None
+            if config.include_error_body:
+                msg = f"the response is not JSON: {response.text[:200]!r}"
+            else:
+                msg = "the response is not valid JSON"
+            raise AgentError(AgentErrorKind.INVALID_RESPONSE, msg) from None
         return coerce_response(map_response(payload, config.response))
 
     async def aclose(self) -> None:

@@ -252,3 +252,85 @@ def test_crashes_are_not_retried_and_timeouts_are() -> None:
     with pytest.raises(AgentError) as exc:
         run(timed.call(REQUEST))
     assert exc.value.kind is AgentErrorKind.TIMEOUT and timed.attempts == 2
+
+
+def test_outputs_adapter_line_number_and_turn_error(tmp_path: Path) -> None:
+    path = tmp_path / "malformed.jsonl"
+    path.write_text(
+        '{"case_id": "c1", "turn": 0, "answer": "ok"}\n'
+        '{"case_id": "c2", "turn": 0, "answer": "fine"}\n'
+        '{"case_id": "c3", invalid_json}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc:
+        OutputsAdapter(path)
+    assert len(exc.value.issues) == 1
+    assert exc.value.issues[0].line == 3
+
+    path2 = tmp_path / "bad_turn.jsonl"
+    path2.write_text(
+        '{"case_id": "c1", "turn": "first", "answer": "ok"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError) as exc2:
+        OutputsAdapter(path2)
+    assert len(exc2.value.issues) == 1
+    assert exc2.value.issues[0].line == 1
+    assert "'turn' must be an integer" in exc2.value.issues[0].message
+
+
+def test_resilient_adapter_per_turn_attempts() -> None:
+    calls = 0
+
+    def flaky(question: str) -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ConnectionError("transient failure")
+        return "finally succeeded"
+
+    adapter = ResilientAdapter(PythonAdapter(flaky), retries=3, backoff_s=0.001)
+    resp = run(adapter.call(REQUEST))
+    assert resp.answer == "finally succeeded"
+    assert resp.metadata["_attempts"] == 3
+    assert adapter.attempts == 3
+
+    def always_fail(question: str) -> str:
+        raise ConnectionError("persistent failure")
+
+    adapter_fail = ResilientAdapter(PythonAdapter(always_fail), retries=2, backoff_s=0.001)
+    with pytest.raises(AgentError) as exc:
+        run(adapter_fail.call(REQUEST))
+    assert exc.value.attempts == 3
+    assert adapter_fail.attempts == 3
+
+
+def test_http_adapter_error_body_sanitized() -> None:
+    leak_text = "TRACEBACK: /var/secrets/key.pem internal.cluster.local"
+
+    adapter = _http(lambda r: httpx.Response(500, text=leak_text))
+    with pytest.raises(AgentError) as exc:
+        run(adapter.call(REQUEST))
+    assert exc.value.kind is AgentErrorKind.CRASH
+    assert "HTTP 500 (Internal Server Error)" in exc.value.message
+    assert "secrets" not in exc.value.message
+    assert "cluster.local" not in exc.value.message
+
+    adapter_debug = _http(lambda r: httpx.Response(500, text=leak_text), include_error_body=True)
+    with pytest.raises(AgentError) as exc_debug:
+        run(adapter_debug.call(REQUEST))
+    assert "cluster.local" in exc_debug.value.message
+
+    adapter_html = _http(lambda r: httpx.Response(200, text="<html>502 Bad Gateway</html>"))
+    with pytest.raises(AgentError) as exc_html:
+        run(adapter_html.call(REQUEST))
+    assert exc_html.value.kind is AgentErrorKind.INVALID_RESPONSE
+    assert exc_html.value.message == "the response is not valid JSON"
+
+    adapter_html_debug = _http(
+        lambda r: httpx.Response(200, text="<html>502 Bad Gateway</html>"),
+        include_error_body=True,
+    )
+    with pytest.raises(AgentError) as exc_html_debug:
+        run(adapter_html_debug.call(REQUEST))
+    assert "502 Bad Gateway" in exc_html_debug.value.message

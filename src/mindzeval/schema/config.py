@@ -98,6 +98,8 @@ class HttpAgentConfig(_AgentBase):
     ``question``, ``history``, ``session_id`` and ``params``."""
 
     response: ResponseMapping = Field(default_factory=ResponseMapping)
+    include_error_body: bool = False
+    """Include raw error body in failure messages. Disabled by default to prevent leaking internal traces or tokens into reports."""
 
 
 class OutputsAgentConfig(_Strict):

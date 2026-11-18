@@ -266,11 +266,13 @@ async def _run_case(
         except AgentError as exc:
             result.latency_ms = (time.perf_counter() - started) * 1000
             result.error_kind, result.error_message = str(exc.kind), exc.message
+            result.attempts = getattr(exc, "attempts", 1)
             decide(result, expects_execution=bool(turn.reference_sql or turn.has_static_expected))
             await report(result)
             history.append(Message("user", turn.question))
             continue
         result.latency_ms = (time.perf_counter() - started) * 1000
+        result.attempts = int(response.metadata.pop("_attempts", 1))
         result.response = response
 
         if not result.blocked:

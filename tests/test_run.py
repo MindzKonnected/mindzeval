@@ -6,6 +6,7 @@ import csv
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -62,8 +63,11 @@ def test_reports_are_written(quick: Path, tmp_path: Path) -> None:
         "customers_in_france_count",
         "top_3_customers_by_spend",
     }
+    assert all("attempts" in r for r in rows)
+    assert rows[0]["attempts"] == "1"
     document = json.loads(written["json"].read_text(encoding="utf-8"))
     assert document["totals"]["turns"] == 3 and len(document["turns"]) == 3
+    assert all("attempts" in t for t in document["turns"])
     assert document["metadata"]["mindzeval_version"]
     assert "<html" in written["html"].read_text(encoding="utf-8")
 
@@ -348,3 +352,61 @@ datasets:
     assert r.cause == "safety_violation"
     assert r.safety is not None
     assert {v.check for v in r.safety.violations} == {"pii_column", "pii_in_answer"}
+
+
+def test_run_records_attempts_per_turn_with_retries(write: Write, tmp_path: Path) -> None:
+    from mindzeval.adapters import PythonAdapter, ResilientAdapter
+
+    calls = 0
+
+    def flaky_agent(question: str) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ConnectionError("intermittent network drop")
+        return {"answer": "42", "rows": [{"value": 42}], "status": "answer"}
+
+    adapter = ResilientAdapter(PythonAdapter(flaky_agent), retries=3, backoff_s=0.001)
+
+    cases_path = write(
+        "cases_retry.yaml",
+        """
+- id: check_retry_case
+  question: How many?
+  expected_value: 42
+  compare: scalar
+""",
+    )
+
+    cfg = write(
+        "mindzeval_retry.yaml",
+        f"""
+project: test-retries
+agent:
+  type: python
+  target: dummy:dummy
+datasets:
+  - {cases_path}
+""",
+    )
+
+    project = load_project(cfg)
+    result = run(project, adapter=adapter)
+    assert len(result.results) == 1
+    r = result.results[0]
+    assert r.attempts == 3
+    assert r.verdict is Verdict.PASS
+
+    written = write_reports(result, output_dir=tmp_path / "reports", formats=["csv", "html"])
+    rows = list(csv.DictReader(written["csv"].open(encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["attempts"] == "3"
+
+    doc = json.loads(written["json"].read_text(encoding="utf-8"))
+    assert doc["turns"][0]["attempts"] == 3
+    assert doc["cost"]["retried_turns"] == 1
+    assert doc["cost"]["total_attempts"] == 3
+
+    html_content = written["html"].read_text(encoding="utf-8")
+    assert "3 tries" in html_content
+    assert "badge-retry" in html_content

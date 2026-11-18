@@ -29,7 +29,8 @@ A **case** is a test question and what a correct agent does with it. Cases live 
 | `expect.reason` | The reason the agent should report when it asks or declines |
 | `expect.trace` | `{"dotted.path": value}` assertions against the agent's trace |
 | `tolerance` | Per-case overrides of the comparison policy (see the config reference) |
-| `expected_rows` | Reference row count when the case was written (for `scalar` cases: the value), for drift checks |
+| `expected_rows` | Integer count for drift check (when `reference_sql` is given), or a `list[dict]` of expected rows (without `reference_sql`) |
+| `expected_value` | Expected scalar value or list of row dicts when `reference_sql` is omitted (`expected_result` and `expected` accepted) |
 | `expect_empty` | `true` when an empty reference result is correct |
 | `tags`, `category`, `difficulty`, `notes` | For filtering and report slices |
 | `metadata` | Anything else |
@@ -45,7 +46,36 @@ A **case** is a test question and what a correct agent does with it. Cases live 
 | `table` | Results with no identifying column | Rows by value, under the tolerance policy |
 | `none` | Behaviour-only cases | Nothing; only behaviour and trace are checked |
 
-When `compare` is omitted: `none` without a `reference_sql`, `set` when `key` is given, otherwise `table`.
+When `compare` is omitted: `none` without a `reference_sql` or static expected result; when static expected result is provided, `scalar` for non-list `expected_value`, `set` when `key` is given, otherwise `table`.
+
+## Static expected results (no database required)
+
+When you don't have a live database connected or want to evaluate against static benchmarks, omit `reference_sql` and supply precomputed expected answers:
+
+```yaml
+# 1. Scalar expectation
+- id: total_users
+  question: How many users are registered?
+  expected_value: 42
+  compare: scalar
+
+# 2. Tabular row expectation
+- id: top_products
+  question: List the top active products
+  key: id
+  expected_rows:
+    - id: 101
+      name: Widget Pro
+    - id: 102
+      name: Gadget Lite
+
+# 3. Expected empty result
+- id: expired_trials
+  question: Which accounts have expired trials today?
+  expect_empty: true
+```
+
+Static expected datasets work with all comparison modes (`scalar`, `set`, `table`, `ordered`).
 
 ## Behaviour cases
 

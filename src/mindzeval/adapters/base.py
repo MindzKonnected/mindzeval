@@ -57,10 +57,11 @@ RETRYABLE = frozenset(
 class AgentError(Exception):
     """The agent call failed. These are agent-side failures, never MindzEval bugs."""
 
-    def __init__(self, kind: AgentErrorKind, message: str) -> None:
+    def __init__(self, kind: AgentErrorKind, message: str, *, attempts: int = 1) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
+        self.attempts = attempts
 
     @property
     def retryable(self) -> bool:
