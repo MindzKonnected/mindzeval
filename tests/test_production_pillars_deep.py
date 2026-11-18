@@ -216,14 +216,14 @@ def test_concurrency_parallel_evaluation_on_postgres(tmp_path: Path) -> None:
 
     cfg_file = tmp_path / "mindzeval.yaml"
     cfg_file.write_text(
-        f"""
+        """
 project: concurrency-postgres
 agent:
   type: python
   target: concurrent_agent:answer
   concurrency: 8
 database:
-  url: {POSTGRES_URL}
+  url: ${MINDZEVAL_TEST_POSTGRES_URL}
   statement_timeout_s: 5.0
 datasets:
   - cases.yaml
